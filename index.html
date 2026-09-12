@@ -1,0 +1,24 @@
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PLAYROOM — Gaming World</title><link rel="stylesheet" href="style.css"></head>
+<body><div class="stars"></div><div class="aurora a1"></div><div class="aurora a2"></div>
+<header><div class="brand"><span>🎮</span> PLAY<span>ROOM</span></div><nav><a href="#games">Games</a><a href="#how">How it works</a></nav><button class="profile">● ONLINE</button></header>
+<main>
+<section class="hero"><div class="eyebrow">🌌 WELCOME TO YOUR GAMING WORLD</div><h1>PLAY.<br><span>COMPETE.</span><br>CHAOS.</h1><p>A social arcade built for <b>2–7 friends</b>. Draw, bluff, battle, laugh and make your own game night.</p><div class="heroBtns"><button class="neon" onclick="createRoom()">CREATE A ROOM <b>↗</b></button><button class="ghost" onclick="toggleJoin()">JOIN WITH CODE</button></div><div id="join" class="join hidden"><input id="playerName" placeholder="Your nickname"><input id="roomInput" maxlength="6" placeholder="ROOM CODE"><button class="neon small" onclick="joinRoom()">ENTER WORLD</button></div><div class="orbit"><span>✏️</span><span>❌</span><span>🎭</span><span>🧠</span><span>😂</span><span>⚡</span></div></section>
+
+<section id="games" class="games"><div class="sectionHead"><div><small>THE ARCADE</small><h2>Choose your <i>weapon.</i></h2></div><span>2–7 PLAYERS</span></div><div class="grid">
+<div class="card wide" onclick="startGame('doodle')"><div class="icon">✏️</div><div><small>01 · SOCIAL DRAWING</small><h3>DOODLE <em>GUESS</em></h3><p>One draws. Everyone guesses. Fastest mind wins the most points.</p></div><b class="arrow">↗</b></div>
+<div class="card" onclick="startGame('ultimate')"><div class="icon">❌⭕</div><small>02 · STRATEGY</small><h3>ULTIMATE<br>TIC-TAC-TOE</h3><p>9 boards. One battlefield.</p><b class="arrow">↗</b></div>
+<div class="card" onclick="startGame('truth')"><div class="icon">🎭</div><small>03 · CHAOS</small><h3>TRUTH<br>OR DARE</h3><p>Brave enough?</p><b class="arrow">↗</b></div>
+<div class="card" onclick="startGame('would')"><div class="icon">🤔</div><small>04 · DEBATE</small><h3>WOULD<br>YOU RATHER</h3><p>Impossible choices.</p><b class="arrow">↗</b></div>
+<div class="card" onclick="startGame('emoji')"><div class="icon">😂</div><small>05 · GUESSING</small><h3>EMOJI<br>DECODE</h3><p>Crack the clue.</p><b class="arrow">↗</b></div>
+<div class="card" onclick="startGame('quiz')"><div class="icon">🧠</div><small>06 · BRAIN RUSH</small><h3>QUICK<br>QUIZ</h3><p>Think. Tap. Win.</p><b class="arrow">↗</b></div>
+<div class="card" onclick="startGame('reaction')"><div class="icon">⚡</div><small>07 · SPEED</small><h3>REACTION<br>RUSH</h3><p>Don't blink.</p><b class="arrow">↗</b></div>
+<div class="card" onclick="startGame('word')"><div class="icon">🔤</div><small>08 · WORDS</small><h3>WORD<br>CHAIN</h3><p>Keep the chain alive.</p><b class="arrow">↗</b></div>
+</div></section>
+
+<section id="how" class="how"><div><small>HOW IT WORKS</small><h2>Your room.<br>Your rules.</h2></div><div class="steps"><div><b>01</b><h3>Create</h3><p>Pick a nickname and create a private room.</p></div><div><b>02</b><h3>Invite</h3><p>Send your 6-character code to up to 6 friends.</p></div><div><b>03</b><h3>Play</h3><p>Jump between games without leaving the room.</p></div></div></section>
+
+<section id="room" class="room hidden"><div class="roomTop"><button class="back" onclick="goHome()">← LEAVE WORLD</button><div class="roomCode">ROOM <b id="code">------</b></div></div><div class="roomGrid"><div class="roomMain"><small>LOBBY</small><h2>THE PARTY IS <span>LOADING.</span></h2><div id="players" class="playerList"></div><div class="roomActions"><button class="ghost" onclick="copyCode()">COPY CODE</button><button class="neon" onclick="startGame('doodle')">START GAME ↗</button></div></div><aside><small>QUICK LAUNCH</small><button onclick="startGame('doodle')">✏️ Doodle Guess</button><button onclick="startGame('ultimate')">❌ Ultimate TTT</button><button onclick="startGame('truth')">🎭 Truth or Dare</button><button onclick="startGame('would')">🤔 Would You Rather</button><button onclick="startGame('quiz')">🧠 Quick Quiz</button></aside></div></section>
+
+<section id="play" class="play hidden"><div class="playTop"><button class="back" onclick="showRoom()">← ROOM</button><div><small id="gameMode">2–7 PLAYERS</small><h2 id="gameName">GAME</h2></div><div id="liveScore">🏆 0</div></div>
+<div id="gameArea"></div></section>
+</main><div id="toast"></div><script src="/socket.io/socket.io.js"></script><script src="app.js"></script></body></html>

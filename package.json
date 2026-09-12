@@ -1,0 +1,8 @@
+{
+  "name": "playroom-world",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PlayRoom - a 2 to 7 player real-time party gaming world",
+  "scripts": {"start": "node server.js"},
+  "dependencies": {"express": "^5.1.0", "socket.io": "^4.8.1"}
+}
