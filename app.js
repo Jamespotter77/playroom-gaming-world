@@ -1,6 +1,17 @@
-const socket = io({ transports:['websocket','polling'] });
+const socket=io({transports:['websocket','polling']});
 
-let room=null, myId=null, currentGame=null, gameTimer=null, ctx=null, drawing=false, erase=false;
+let room=null;
+let myId=null;
+let currentGame=null;
+let ctx=null;
+let drawing=false;
+let erase=false;
+
+let truthState=null;
+let wouldState=null;
+let reactionState=null;
+let bikeState=null;
+let fightState=null;
 
 const $=s=>document.querySelector(s);
 
@@ -12,70 +23,168 @@ const games={
   emoji:['EMOJI DECODE','2–7 PLAYERS'],
   quiz:['QUICK QUIZ','2–7 PLAYERS'],
   reaction:['REACTION RUSH','2–7 PLAYERS'],
-  word:['WORD CHAIN','2–7 PLAYERS']
+  word:['WORD CHAIN','2–7 PLAYERS'],
+  bike:['BIKE RACING','2–7 PLAYERS'],
+  fight:['NEON FIGHT','2 PLAYERS']
 };
 
-const words=[
-  'CAT','DOG','PIZZA','GUITAR','ELEPHANT','ROCKET',
-  'CAKE','SUNGLASSES','BICYCLE','TIGER','ICE CREAM','CASTLE'
-];
+function esc(v){
+  return String(v).replace(/[&<>'"]/g,c=>({
+    '&':'&amp;',
+    '<':'&lt;',
+    '>':'&gt;',
+    "'":'&#39;',
+    '"':'&quot;'
+  }[c]));
+}
 
 function toast(t){
-  const el=$('#toast');
-  if(!el)return;
+  const e=$('#toast');
+  if(!e)return;
 
-  el.textContent=t;
-  el.style.display='block';
+  e.textContent=t;
+  e.style.display='block';
 
-  clearTimeout(window.toastTimer);
+  clearTimeout(window.tt);
 
-  window.toastTimer=setTimeout(
-    ()=>el.style.display='none',
+  window.tt=setTimeout(
+    ()=>e.style.display='none',
     2200
   );
 }
 
 function toggleJoin(){
-  $('#join').classList.toggle('hidden');
+  $('#join')?.classList.toggle('hidden');
   $('#playerName')?.focus();
 }
 
 function createRoom(){
-  const n=$('#playerName').value.trim()||'Player';
-  socket.emit('room:create',{name:n});
+
+  socket.emit(
+    'room:create',
+    {
+      name:
+        $('#playerName')?.value.trim()||
+        'Player'
+    }
+  );
+
 }
 
 function joinRoom(){
-  const n=$('#playerName').value.trim()||'Player';
-  const c=$('#roomInput').value.trim();
 
-  if(!c){
-    return toast('Enter the room code first.');
+  const code=
+    $('#roomInput')?.value.trim();
+
+  if(!code){
+    return toast(
+      'Enter the room code first.'
+    );
   }
 
-  socket.emit('room:join',{
-    code:c,
-    name:n
-  });
+  socket.emit(
+    'room:join',
+    {
+      code,
+      name:
+        $('#playerName')?.value.trim()||
+        'Player'
+    }
+  );
+
 }
 
 function hideAll(){
-  $('#room').classList.add('hidden');
-  $('#play').classList.add('hidden');
+
+  $('#room')?.classList.add('hidden');
+  $('#play')?.classList.add('hidden');
+
 }
 
 function showRoom(){
 
+  currentGame=null;
+
   hideAll();
 
-  $('#room').classList.remove('hidden');
+  $('#room')?.classList.remove('hidden');
 
   setTimeout(()=>{
-    $('#room').scrollIntoView({
+    $('#room')?.scrollIntoView({
       behavior:'smooth',
       block:'start'
     });
   },80);
+
+}
+
+function renderPlayers(){
+
+  if(!room||!$('#players'))return;
+
+  $('#players').innerHTML=
+    room.players.map(p=>`
+
+      <div class="player">
+
+        <span class="av">
+          ${p.avatar}
+        </span>
+
+        <b>
+          ${esc(p.name)}
+        </b>
+
+        ${
+          p.id===room.host
+          ?' <small>HOST</small>'
+          :''
+        }
+
+        <span style="margin-left:auto">
+          🏆 ${p.score||0}
+        </span>
+
+      </div>
+
+    `).join('');
+
+}
+
+function startGame(g){
+
+  if(!room){
+    return toast(
+      'Create or join a room first ✨'
+    );
+  }
+
+  socket.emit(
+    'game:start',
+    {game:g},
+    a=>{
+      if(a&&!a.ok){
+        toast(a.message);
+      }
+    }
+  );
+
+}
+
+function copyCode(){
+
+  const c=
+    $('#code')?.textContent||'';
+
+  navigator.clipboard
+    ?.writeText(c)
+    .then(
+      ()=>toast('Room code copied!')
+    )
+    .catch(
+      ()=>toast('Room code: '+c)
+    );
+
 }
 
 function goHome(){
@@ -91,103 +200,7 @@ function goHome(){
     top:0,
     behavior:'smooth'
   });
-}
 
-function renderPlayers(){
-
-  if(!room)return;
-
-  $('#players').innerHTML=
-    room.players.map(p=>`
-      <div class="player">
-
-        <span class="av">
-          ${p.avatar}
-        </span>
-
-        <b>
-          ${escapeHtml(p.name)}
-        </b>
-
-        ${
-          p.id===room.host
-          ? ' <small>HOST</small>'
-          : ''
-        }
-
-        <span style="margin-left:auto">
-          🏆 ${p.score||0}
-        </span>
-
-      </div>
-    `).join('');
-}
-
-function escapeHtml(v){
-
-  return String(v).replace(
-    /[&<>'"]/g,
-    c=>({
-      '&':'&amp;',
-      '<':'&lt;',
-      '>':'&gt;',
-      "'":'&#39;',
-      '"':'&quot;'
-    }[c])
-  );
-}
-
-function startGame(g){
-
-  if(!room){
-    return toast(
-      'Create or join a room first ✨'
-    );
-  }
-
-  if(!socket.connected){
-    return toast(
-      'Connecting to game server… please wait 1 second.'
-    );
-  }
-
-  toast(
-    'Starting '+
-    (games[g]?.[0]||'game')+
-    '… 🎮'
-  );
-
-  socket.emit(
-    'game:start',
-    {game:g},
-    ack=>{
-
-      if(
-        ack &&
-        !ack.ok
-      ){
-        toast(
-          ack.message||
-          'Could not start the game.'
-        );
-      }
-
-    }
-  );
-}
-
-function copyCode(){
-
-  const code=$('#code').textContent;
-
-  navigator.clipboard
-    ?.writeText(code)
-    .then(
-      ()=>toast('Room code copied!')
-    )
-    .catch(
-      ()=>toast('Room code: '+code)
-    );
 }
 
 function addScore(n){
@@ -195,15 +208,97 @@ function addScore(n){
 }
 
 
-/* =========================
+/* =================================
+   PARTY CHAT
+================================= */
+
+function partyChat(){
+
+  return `
+
+    <div class="partyChat">
+
+      <b>💬 PARTY CHAT</b>
+
+      <div
+        id="partyLog"
+        class="chatLog">
+      </div>
+
+      <div class="chatInput">
+
+        <input
+          id="partyInput"
+          placeholder="Type a message…"
+          onkeydown="
+            if(event.key==='Enter')
+            sendPartyChat()
+          "
+        >
+
+        <button
+          onclick="sendPartyChat()">
+          SEND
+        </button>
+
+      </div>
+
+    </div>
+
+  `;
+
+}
+
+function sendPartyChat(){
+
+  const input=$('#partyInput');
+
+  const message=
+    input?.value.trim();
+
+  if(!message)return;
+
+  socket.emit(
+    'party:chat',
+    message.slice(0,160)
+  );
+
+  input.value='';
+
+}
+
+function appendChat(name,msg){
+
+  const log=$('#partyLog');
+
+  if(!log)return;
+
+  log.innerHTML+=`
+
+    <div class="chatLine">
+
+      <b>${esc(name)}:</b>
+      ${esc(msg)}
+
+    </div>
+
+  `;
+
+  log.scrollTop=
+    log.scrollHeight;
+
+}
+
+
+/* =================================
    CONNECTION
-========================= */
+================================= */
 
 socket.on(
   'connect',
   ()=>{
     myId=socket.id;
-    toast('Connected to PlayRoom ⚡');
+    toast('Connected ⚡');
   }
 );
 
@@ -211,32 +306,35 @@ socket.on(
   'connect_error',
   ()=>{
     toast(
-      'Could not connect to the game server. Refresh once.'
+      'Server connection failed. Refresh once.'
     );
   }
 );
 
 
-/* =========================
+/* =================================
    ROOM
-========================= */
+================================= */
 
 socket.on(
   'room:created',
-  ({code})=>{
-    $('#code').textContent=code;
+  d=>{
+
+    $('#code').textContent=
+      d.code;
 
     toast(
       'Room created! Share this code 🎉'
     );
+
   }
 );
 
 
 /*
  IMPORTANT:
- Do NOT call showRoom() while a game
- is already running.
+ The lobby must NOT appear while
+ a game is running.
 */
 
 socket.on(
@@ -245,7 +343,8 @@ socket.on(
 
     room=r;
 
-    $('#code').textContent=r.code;
+    $('#code').textContent=
+      r.code;
 
     renderPlayers();
 
@@ -281,8 +380,10 @@ socket.on(
 
     room.players.forEach(
       p=>{
-        p.score=
-          map.get(p.id)??p.score;
+        if(map.has(p.id)){
+          p.score=
+            map.get(p.id);
+        }
       }
     );
 
@@ -293,18 +394,23 @@ socket.on(
         x=>x.id===myId
       );
 
-    if(me){
+    if(
+      me&&
+      $('#liveScore')
+    ){
+
       $('#liveScore').textContent=
         '🏆 '+me.score;
+
     }
 
   }
 );
 
 
-/* =========================
+/* =================================
    GAME START
-========================= */
+================================= */
 
 socket.on(
   'game:started',
@@ -313,12 +419,14 @@ socket.on(
     const game=
       typeof g==='string'
       ?g
-      :(g?.game||g?.name);
+      :g?.game;
 
     if(!games[game]){
+
       return toast(
-        'Game could not be loaded. Refresh once.'
+        'Game could not be loaded.'
       );
+
     }
 
     renderGame(game);
@@ -331,7 +439,8 @@ socket.on(
   msg=>{
 
     toast(
-      msg||'Game ended'
+      msg||
+      'Game ended'
     );
 
     currentGame=null;
@@ -342,28 +451,15 @@ socket.on(
 );
 
 
-/* =========================
-   RENDER GAME
-========================= */
-
 function renderGame(g){
-
-  g=
-    typeof g==='string'
-    ?g
-    :(g?.game||g?.name);
-
-  if(!games[g]){
-    return toast(
-      'Unknown game. Please try again.'
-    );
-  }
 
   currentGame=g;
 
   hideAll();
 
-  $('#play').classList.remove('hidden');
+  $('#play').classList.remove(
+    'hidden'
+  );
 
   $('#gameName').textContent=
     games[g][0];
@@ -371,61 +467,70 @@ function renderGame(g){
   $('#gameMode').textContent=
     games[g][1];
 
-  $('#liveScore').textContent=
-    '🏆 '+
-    (
-      room?.players.find(
-        p=>p.id===myId
-      )?.score||0
-    );
-
   let html='';
 
   if(g==='doodle')
     html=doodle();
 
-  if(g==='ultimate')
+  else if(g==='ultimate')
     html=ultimate();
 
-  if(g==='truth')
+  else if(g==='truth')
     html=truth();
 
-  if(g==='would')
+  else if(g==='would')
     html=would();
 
-  if(g==='emoji')
+  else if(g==='emoji')
     html=emoji();
 
-  if(g==='quiz')
+  else if(g==='quiz')
     html=quiz();
 
-  if(g==='reaction')
+  else if(g==='reaction')
     html=reaction();
 
-  if(g==='word')
+  else if(g==='word')
     html=word();
 
-  $('#gameArea').innerHTML=html;
+  else if(g==='bike')
+    html=bike();
+
+  else if(g==='fight')
+    html=fight();
+
+  $('#gameArea').innerHTML=
+    html;
 
   if(g==='doodle')
     initDoodle();
 
-  if(g==='reaction')
-    initReaction();
+  if(g==='truth')
+    renderTruthState();
 
   if(g==='would')
-    newWould();
+    renderWouldState();
+
+  if(g==='reaction')
+    renderReactionState();
+
+  if(g==='bike')
+    renderBike();
+
+  if(g==='fight')
+    renderFight();
 
 }
 
 
-/* =========================
-   DOODLE GUESS
-========================= */
+/* =================================
+   DOODLE
+================================= */
 
 function doodle(){
 
   return `
+
     <div class="gameBox">
 
       <div class="round">
@@ -445,7 +550,6 @@ function doodle(){
         </span>
 
       </div>
-
 
       <div class="doodle">
 
@@ -470,7 +574,6 @@ function doodle(){
 
         </div>
 
-
         <div class="chat">
 
           <b>
@@ -480,13 +583,8 @@ function doodle(){
           <div
             class="chatLog"
             id="log">
-
-            <div class="chatLine">
-              Waiting for the drawer…
-            </div>
-
+            Waiting for the drawer…
           </div>
-
 
           <div class="chatInput">
 
@@ -494,13 +592,14 @@ function doodle(){
               id="guess"
               placeholder="Guess the word…"
               onkeydown="
-                if(event.key==='Enter')guess()
+                if(event.key==='Enter')
+                guess()
               "
             >
 
             <button
               onclick="guess()">
-              Send
+              SEND
             </button>
 
           </div>
@@ -509,19 +608,16 @@ function doodle(){
 
       </div>
 
-
       <div class="toolbar">
 
         <button
-          id="clearBtn"
           onclick="clearDraw()">
-          Clear
+          CLEAR
         </button>
 
         <button
-          id="eraserBtn"
           onclick="eraser()">
-          🧽 Eraser
+          🧽 ERASER
         </button>
 
         <input
@@ -533,29 +629,27 @@ function doodle(){
         >
 
         <button
-          class="neon small"
-          onclick="showRoom()">
+          class="ghost"
+          onclick="endGame()">
           END GAME
         </button>
 
       </div>
 
     </div>
+
   `;
+
 }
 
-
 function initDoodle(){
-
-  ctx=null;
-  drawing=false;
-  erase=false;
 
   const c=$('#cv');
 
   if(!c)return;
 
-  ctx=c.getContext('2d');
+  ctx=
+    c.getContext('2d');
 
   ctx.fillStyle='white';
 
@@ -565,9 +659,6 @@ function initDoodle(){
     c.width,
     c.height
   );
-
-  ctx.beginPath();
-
 
   c.onpointerdown=e=>{
 
@@ -583,29 +674,21 @@ function initDoodle(){
 
   };
 
-
   c.onpointerup=()=>{
     drawing=false;
-    ctx?.beginPath();
+    ctx.beginPath();
   };
-
 
   c.onpointerleave=()=>{
     drawing=false;
-    ctx?.beginPath();
+    ctx.beginPath();
   };
 
-
   c.onpointermove=e=>{
-
-    if(drawing){
-      stroke(e);
-    }
-
+    if(drawing)stroke(e);
   };
 
 }
-
 
 function stroke(e){
 
@@ -618,13 +701,11 @@ function stroke(e){
 
   const x=
     (e.clientX-r.left)*
-    c.width/
-    r.width;
+    c.width/r.width;
 
   const y=
     (e.clientY-r.top)*
-    c.height/
-    r.height;
+    c.height/r.height;
 
   ctx.lineWidth=
     +$('#brush').value;
@@ -632,7 +713,9 @@ function stroke(e){
   ctx.lineCap='round';
 
   ctx.strokeStyle=
-    erase?'white':'#111';
+    erase
+    ?'white'
+    :'#111';
 
   ctx.lineTo(x,y);
 
@@ -654,14 +737,11 @@ function stroke(e){
 
 }
 
-
 function clearDraw(){
 
   if(
-    $('#role').dataset.drawer!=='yes'
-  ){
-    return;
-  }
+    $('#role')?.dataset.drawer!=='yes'
+  )return;
 
   ctx?.clearRect(
     0,
@@ -685,59 +765,52 @@ function clearDraw(){
 
   }
 
-  socket.emit('draw:clear');
+  socket.emit(
+    'draw:clear'
+  );
 
 }
-
 
 function eraser(){
 
   if(
-    $('#role').dataset.drawer!=='yes'
-  ){
-    return;
-  }
+    $('#role')?.dataset.drawer!=='yes'
+  )return;
 
   erase=!erase;
 
   toast(
     erase
-    ?'Eraser on'
-    :'Pen on'
+    ?'ERASER ON 🧽'
+    :'PEN ON ✏️'
   );
 
 }
-
 
 function guess(){
 
   const i=$('#guess');
 
-  const v=i.value.trim();
+  const v=
+    i?.value.trim();
 
   if(!v)return;
 
   socket.emit(
     'doodle:guess',
-    {
-      guess:v
-    }
+    {guess:v}
   );
 
   i.value='';
 
 }
 
-
 socket.on(
   'doodle:state',
   d=>{
 
-    if(
-      currentGame!=='doodle'
-    ){
+    if(currentGame!=='doodle')
       return;
-    }
 
     $('#dRound').textContent=
       `ROUND ${d.round} / ${d.totalRounds}`;
@@ -745,29 +818,23 @@ socket.on(
     $('#tm').textContent=
       d.timeLeft;
 
-    const role=$('#role');
+    const r=$('#role');
 
-    role.dataset.drawer=
+    r.dataset.drawer=
       d.drawerId===myId
       ?'yes'
       :'no';
 
-    role.textContent=
+    r.textContent=
       d.drawerId===myId
       ?'✏️ YOU ARE DRAWING'
-      :`🎯 ${escapeHtml(d.drawerName)} IS DRAWING`;
+      :`🎯 ${esc(d.drawerName)} IS DRAWING`;
 
     $('#word').textContent=
       d.word||'Guess it!';
 
     $('#guess').disabled=
       d.drawerId===myId;
-
-    $('#clearBtn').disabled=
-      d.drawerId!==myId;
-
-    $('#eraserBtn').disabled=
-      d.drawerId!==myId;
 
     $('#brush').disabled=
       d.drawerId!==myId;
@@ -783,65 +850,44 @@ socket.on(
   }
 );
 
-
 socket.on(
   'doodle:tick',
   n=>{
-
-    if($('#tm')){
+    if($('#tm'))
       $('#tm').textContent=n;
-    }
-
   }
 );
-
 
 socket.on(
   'doodle:guess',
   d=>{
 
-    if(!$('#log'))return;
-
-    $('#log').innerHTML+=`
-      <div class="chatLine">
-        ${escapeHtml(d.name)}:
-        ${escapeHtml(d.guess)}
-      </div>
-    `;
-
-    $('#log').scrollTop=
-      $('#log').scrollHeight;
-
-  }
-);
-
-
-socket.on(
-  'doodle:correct',
-  d=>{
-
     if($('#log')){
 
       $('#log').innerHTML+=`
+
         <div class="chatLine">
-          🎉 <b>
-            ${escapeHtml(d.name)}
-            got it!
-            Word:
-            ${escapeHtml(d.word)}
-          </b>
+
+          <b>${esc(d.name)}:</b>
+          ${esc(d.guess)}
+
         </div>
+
       `;
 
     }
 
-    toast(
-      `${d.name} guessed it! +100`
-    );
-
   }
 );
 
+socket.on(
+  'doodle:correct',
+  d=>{
+    toast(
+      `${d.name} guessed ${d.word}! 🎉`
+    );
+  }
+);
 
 socket.on(
   'doodle:message',
@@ -850,9 +896,11 @@ socket.on(
     if($('#log')){
 
       $('#log').innerHTML+=`
+
         <div class="chatLine">
-          ${escapeHtml(m)}
+          ${esc(m)}
         </div>
+
       `;
 
     }
@@ -860,22 +908,13 @@ socket.on(
   }
 );
 
-
 socket.on(
   'doodle:finished',
   ()=>{
-
-    toast(
-      'Doodle finished! 🎉'
-    );
-
     currentGame=null;
-
     showRoom();
-
   }
 );
-
 
 socket.on(
   'draw:stroke',
@@ -884,9 +923,7 @@ socket.on(
     if(!ctx)return;
 
     ctx.lineWidth=d.w;
-
     ctx.lineCap='round';
-
     ctx.strokeStyle=d.color;
 
     ctx.lineTo(
@@ -905,7 +942,6 @@ socket.on(
 
   }
 );
-
 
 socket.on(
   'draw:clear',
@@ -930,13 +966,14 @@ socket.on(
 );
 
 
-/* =========================
+/* =================================
    TIC TAC TOE
-========================= */
+================================= */
 
 function ultimate(){
 
   return `
+
     <div class="gameBox">
 
       <div class="round">
@@ -951,97 +988,53 @@ function ultimate(){
 
       </div>
 
-
       <div
         class="ttt"
         id="ttt">
-
-        ${Array(9)
-          .fill('')
-          .map(
-            (_,i)=>
-              `<button onclick="move(${i})"></button>`
-          )
-          .join('')
-        }
-
       </div>
 
+      <p id="tttInfo">
+        Waiting…
+      </p>
 
-      <div style="text-align:center">
-
-        <p id="tttInfo">
-          Waiting for game…
-        </p>
-
-        <button
-          class="ghost"
-          onclick="resetTTT()">
-          RESET BOARD
-        </button>
-
-      </div>
+      <button
+        class="ghost"
+        onclick="resetTTT()">
+        RESET BOARD
+      </button>
 
     </div>
+
   `;
 
 }
 
-
 function move(i){
-
   socket.emit(
     'ttt:move',
-    {
-      index:i
-    }
+    {index:i}
   );
-
 }
-
 
 function resetTTT(){
-
-  socket.emit(
-    'ttt:reset'
-  );
-
+  socket.emit('ttt:reset');
 }
-
 
 socket.on(
   'ttt:state',
   t=>{
-
-    if(
-      currentGame!=='ultimate'
-    ){
-      return;
-    }
-
-    paintTTT(t);
-
-    if(t.winner){
-
-      toast(
-        t.winner==='DRAW'
-        ?'Draw! 🤝'
-        :`${t.winner} wins! 🏆`
-      );
-
-    }
-
+    if(currentGame==='ultimate')
+      paintTTT(t);
   }
 );
 
-
 function paintTTT(t){
 
-  const el=$('#ttt');
+  const e=$('#ttt');
 
-  if(!el)return;
+  if(!e)return;
 
-  el.innerHTML=
+  e.innerHTML=
     t.board.map(
       (x,i)=>
         `<button
@@ -1051,55 +1044,45 @@ function paintTTT(t){
         </button>`
     ).join('');
 
+  const n=
+    t.players.indexOf(myId);
 
-  const me=
-    t.players?.indexOf(myId);
-
-  const symbol=
-    me===0
-    ?'X'
-    :me===1
-      ?'O'
-      :'-';
-
+  const s=
+    n===0?'X':
+    n===1?'O':'-';
 
   $('#ut').textContent=
     t.winner
     ?(
       t.winner==='DRAW'
       ?'DRAW GAME'
-      :`${t.winner} WINS!`
+      :t.winner+' WINS!'
     )
     :(
-      t.turn===symbol
-      ?'YOUR TURN ('+symbol+')'
-      :`${t.turn}'S TURN`
+      t.turn===s
+      ?'YOUR TURN ('+s+')'
+      :t.turn+"'S TURN"
     );
 
-
   $('#tttInfo').textContent=
-    `You are ${symbol}. Only the correct player's turn can move.`;
+    'You are '+s+'. '+
+    (
+      t.turn===s
+      ?'Your turn!'
+      :'Wait for the other player.'
+    );
 
 }
 
 
-/* =========================
+/* =================================
    TRUTH OR DARE
-========================= */
-
-const truths=[
-  ['TRUTH','What is your most useless talent?'],
-  ['DARE','Do your best celebrity impression for 20 seconds.'],
-  ['TRUTH','What is the funniest thing you have done to impress someone?'],
-  ['DARE','Talk like a robot until your next turn.'],
-  ['TRUTH','Who would survive longest in a zombie apocalypse?'],
-  ['DARE','Make your weirdest face for 10 seconds.']
-];
-
+================================= */
 
 function truth(){
 
   return `
+
     <div class="fun">
 
       <div class="emoji">
@@ -1107,58 +1090,79 @@ function truth(){
       </div>
 
       <div
-        class="eyebrow"
-        id="ttype">
-        TRUTH
+        id="truthTurn"
+        class="eyebrow">
       </div>
 
-      <h3 id="tp">
-        Click below to reveal your challenge.
+      <h3 id="truthPrompt">
       </h3>
 
-      <button
-        class="neon"
-        onclick="newTruth()">
-        NEW CARD
-      </button>
+      <div id="truthActions">
+      </div>
+
+      ${partyChat()}
 
     </div>
+
   `;
 
 }
 
+function renderTruthState(){
 
-function newTruth(){
+  if(!truthState)return;
 
-  const x=
-    truths[
-      Math.floor(
-        Math.random()*truths.length
-      )
-    ];
+  $('#truthTurn').textContent=
+    truthState.turnName+
+    "'S TURN • "+
+    truthState.type;
 
-  $('#ttype').textContent=x[0];
+  $('#truthPrompt').textContent=
+    truthState.prompt;
 
-  $('#tp').textContent=x[1];
+  $('#truthActions').innerHTML=
+    truthState.turnId===myId
+
+    ?
+
+    `<button
+      class="neon"
+      onclick="truthDone()">
+      DONE / NEXT PLAYER
+    </button>`
+
+    :
+
+    `<p>
+      Watch ${esc(truthState.turnName)}
+      and chat with the party 💬
+    </p>`;
 
 }
 
+function truthDone(){
+  socket.emit('truth:done');
+}
 
-/* =========================
+socket.on(
+  'truth:state',
+  d=>{
+    truthState=d;
+
+    if(currentGame==='truth')
+      renderTruthState();
+  }
+);
+
+
+/* =================================
    WOULD YOU RATHER
-========================= */
-
-const wr=[
-  ['Have unlimited money','Have unlimited free time'],
-  ['Fly','Be invisible'],
-  ['Never use social media','Never watch movies'],
-  ['Always be early','Always be late']
-];
-
+================================= */
 
 function would(){
 
   return `
+
     <div class="fun">
 
       <div class="emoji">
@@ -1166,90 +1170,98 @@ function would(){
       </div>
 
       <h3>
-        Would you rather…
+        WOULD YOU RATHER?
       </h3>
+
+      <p id="wouldQ">
+      </p>
 
       <div class="choices">
 
         <button
           id="wa"
-          onclick="vote($('#wa').textContent)">
+          onclick="wouldVote('A')">
         </button>
 
         <button
           id="wb"
-          onclick="vote($('#wb').textContent)">
+          onclick="wouldVote('B')">
         </button>
 
       </div>
 
-      <p id="wv"></p>
+      <p id="wouldResult">
+      </p>
 
       <button
         class="ghost"
-        onclick="newWould()">
-        NEW CHOICE
+        onclick="wouldNext()">
+        NEXT QUESTION
       </button>
 
+      ${partyChat()}
+
     </div>
+
   `;
 
 }
 
+function renderWouldState(){
 
-function newWould(){
+  if(!wouldState)return;
 
-  const x=
-    wr[
-      Math.floor(
-        Math.random()*wr.length
-      )
-    ];
+  $('#wouldQ').textContent=
+    wouldState.question;
 
-  $('#wa').textContent=x[0];
+  $('#wa').textContent=
+    'A • '+wouldState.a;
 
-  $('#wb').textContent=x[1];
+  $('#wb').textContent=
+    'B • '+wouldState.b;
 
-  $('#wv').textContent='';
-
-}
-
-
-function vote(x){
-
-  $('#wv').textContent=
-    'You picked '+x+' 🎉';
+  $('#wouldResult').textContent=
+    `A: ${wouldState.votes.A} votes • `+
+    `B: ${wouldState.votes.B} votes`;
 
 }
 
+function wouldVote(x){
+  socket.emit(
+    'would:vote',
+    x
+  );
+}
 
-/* =========================
+function wouldNext(){
+  socket.emit(
+    'would:next'
+  );
+}
+
+socket.on(
+  'would:state',
+  d=>{
+    wouldState=d;
+
+    if(currentGame==='would')
+      renderWouldState();
+  }
+);
+
+
+/* =================================
    EMOJI
-========================= */
-
-const em=[
-  ['🐱👑','cat king'],
-  ['🌧️☀️','weather'],
-  ['🍕❤️','love pizza'],
-  ['🚀🌙','moon rocket'],
-  ['🐝🍯','honey bee']
-];
-
+================================= */
 
 function emoji(){
 
-  const x=
-    em[
-      Math.floor(
-        Math.random()*em.length
-      )
-    ];
-
   return `
+
     <div class="fun">
 
       <div class="emoji">
-        ${x[0]}
+        🐱👑
       </div>
 
       <h3>
@@ -1259,45 +1271,44 @@ function emoji(){
       <input
         class="answer"
         id="ea"
-        placeholder="Type your answer"
+        placeholder="Your answer"
       >
 
       <button
         class="neon"
-        onclick="checkE('${x[1]}')">
+        onclick="checkE()">
         CHECK
       </button>
 
       <p id="er"></p>
 
     </div>
+
   `;
 
 }
 
+function checkE(){
 
-function checkE(a){
-
-  const v=
+  const a=
     $('#ea').value
       .trim()
       .toLowerCase();
 
   $('#er').textContent=
-    v===a
+    a==='cat king'
     ?'🎉 Correct! +100'
     :'❌ Try again!';
 
-  if(v===a){
+  if(a==='cat king')
     addScore(100);
-  }
 
 }
 
 
-/* =========================
+/* =================================
    QUIZ
-========================= */
+================================= */
 
 const qs=[
   [
@@ -1322,7 +1333,6 @@ const qs=[
   ]
 ];
 
-
 function quiz(){
 
   const q=
@@ -1333,6 +1343,7 @@ function quiz(){
     ];
 
   return `
+
     <div class="fun">
 
       <div class="eyebrow">
@@ -1366,10 +1377,10 @@ function quiz(){
       </button>
 
     </div>
+
   `;
 
 }
-
 
 function qa(i,c){
 
@@ -1378,112 +1389,99 @@ function qa(i,c){
     ?'🎉 Correct! +100'
     :'❌ Wrong!';
 
-  if(i===c){
+  if(i===c)
     addScore(100);
-  }
 
 }
 
 
-/* =========================
-   REACTION
-========================= */
+/* =================================
+   REACTION RUSH
+================================= */
 
 function reaction(){
 
   return `
-    <div class="gameBox">
 
-      <div class="round">
-
-        <span>
-          REACTION RUSH
-        </span>
-
-        <span>
-          Wait for GREEN
-        </span>
-
-      </div>
+    <div class="fun">
 
       <div
-        id="react"
-        class="reaction">
-        WAIT…
+        class="emoji">
+        ⚡
       </div>
 
+      <h3>
+        SELECT THE NAMED THING
+      </h3>
+
+      <p id="reactionTarget">
+        Loading target…
+      </p>
+
+      <div
+        id="reactionChoices"
+        class="choices">
+      </div>
+
+      <p id="reactionMsg">
+      </p>
+
     </div>
+
   `;
 
 }
 
+function renderReactionState(){
 
-function initReaction(){
+  if(!reactionState)return;
 
-  const r=$('#react');
+  $('#reactionTarget').textContent=
+    '🎯 TARGET: '+
+    reactionState.target;
 
-  const delay=
-    1200+
-    Math.random()*3500;
+  $('#reactionChoices').innerHTML=
+    reactionState.options.map(
+      x=>
+        `<button
+          onclick="reactionPick('${x}')">
+          ${x}
+        </button>`
+    ).join('');
 
-  r.onclick=()=>{
-
-    if(
-      !r.classList.contains('go')
-    ){
-      return toast(
-        'Too early! 😈'
-      );
-    }
-
-    const t=
-      performance.now()-
-      r.dataset.start;
-
-    toast(
-      Math.round(t)+' ms! ⚡'
-    );
-
-    addScore(
-      Math.max(
-        10,
-        300-
-        Math.round(t/5)
-      )
-    );
-
-    r.className='reaction';
-
-    r.textContent='WAIT…';
-
-    initReaction();
-
-  };
-
-
-  setTimeout(()=>{
-
-    r.className=
-      'reaction go';
-
-    r.textContent=
-      'CLICK!';
-
-    r.dataset.start=
-      performance.now();
-
-  },delay);
+  $('#reactionMsg').textContent=
+    reactionState.message||'';
 
 }
 
+function reactionPick(x){
 
-/* =========================
+  socket.emit(
+    'reaction:pick',
+    x
+  );
+
+}
+
+socket.on(
+  'reaction:state',
+  d=>{
+    reactionState=d;
+
+    if(currentGame==='reaction')
+      renderReactionState();
+  }
+);
+
+
+/* =================================
    WORD CHAIN
-========================= */
+================================= */
 
 function word(){
 
   return `
+
     <div class="fun">
 
       <div class="emoji">
@@ -1491,12 +1489,8 @@ function word(){
       </div>
 
       <h3>
-        Word Chain
+        WORD CHAIN
       </h3>
-
-      <p>
-        Type a word beginning with the last letter.
-      </p>
 
       <div
         class="answer"
@@ -1519,16 +1513,17 @@ function word(){
       <p id="wr"></p>
 
     </div>
+
   `;
 
 }
-
 
 function chain(){
 
   const i=$('#wi');
 
-  const v=i.value.trim();
+  const v=
+    i.value.trim();
 
   if(!v)return;
 
@@ -1564,9 +1559,293 @@ function chain(){
 }
 
 
-/* =========================
-   BUTTON SUPPORT
-========================= */
+/* =================================
+   BIKE RACING
+================================= */
+
+function bike(){
+
+  return `
+
+    <div class="fun">
+
+      <div
+        style="
+          font-size:70px;
+          filter:drop-shadow(0 0 15px #7b4dff);
+        ">
+        🏍️
+      </div>
+
+      <h2>
+        BIKE RACING
+      </h2>
+
+      <p>
+        Tap BOOST repeatedly!
+        First to 100% wins 🏁
+      </p>
+
+      <div id="raceTrack">
+      </div>
+
+      <button
+        class="neon"
+        onclick="bikeBoost()">
+        🚀 BOOST
+      </button>
+
+      ${partyChat()}
+
+    </div>
+
+  `;
+
+}
+
+function renderBike(){
+
+  if(!bikeState)return;
+
+  $('#raceTrack').innerHTML=
+    bikeState.players.map(
+      p=>`
+
+        <div
+          style="
+            margin:12px 0;
+          ">
+
+          <b>
+            ${esc(p.name)}
+          </b>
+
+          <div
+            style="
+              height:28px;
+              background:#171a2b;
+              border-radius:20px;
+              overflow:hidden;
+              margin-top:5px;
+              border:1px solid #34395c;
+            ">
+
+            <div
+              style="
+                width:${p.progress}%;
+                height:100%;
+                display:flex;
+                align-items:center;
+                padding-left:5px;
+                font-size:21px;
+                transition:width .25s;
+              ">
+
+              🏍️
+
+            </div>
+
+          </div>
+
+          <small>
+            ${p.progress}%
+          </small>
+
+        </div>
+
+      `
+    ).join('');
+
+}
+
+function bikeBoost(){
+
+  socket.emit(
+    'bike:boost'
+  );
+
+}
+
+socket.on(
+  'bike:state',
+  d=>{
+
+    bikeState=d;
+
+    if(currentGame==='bike')
+      renderBike();
+
+  }
+);
+
+
+/* =================================
+   NEON FIGHT
+================================= */
+
+function fight(){
+
+  return `
+
+    <div class="fun">
+
+      <div
+        style="
+          font-size:65px;
+          animation:fightPulse .5s infinite alternate;
+        ">
+        ⚔️
+      </div>
+
+      <h2>
+        NEON FIGHT
+      </h2>
+
+      <div
+        id="fightArena">
+      </div>
+
+      <div class="choices">
+
+        <button
+          onclick="fightMove('punch')">
+          🥊 PUNCH
+        </button>
+
+        <button
+          onclick="fightMove('kick')">
+          🦵 KICK
+        </button>
+
+        <button
+          onclick="fightMove('special')">
+          ⚡ SPECIAL
+        </button>
+
+      </div>
+
+      <p id="fightMsg">
+      </p>
+
+      ${partyChat()}
+
+      <style>
+        @keyframes fightPulse{
+          from{transform:scale(1)}
+          to{transform:scale(1.12)}
+        }
+
+        @keyframes hitFlash{
+          0%{transform:scale(1)}
+          50%{transform:scale(1.08)}
+          100%{transform:scale(1)}
+        }
+      </style>
+
+    </div>
+
+  `;
+
+}
+
+function renderFight(){
+
+  if(!fightState)return;
+
+  $('#fightArena').innerHTML=
+    fightState.players.map(
+      p=>`
+
+        <div
+          style="
+            margin:15px;
+            padding:12px;
+            border:1px solid #33395d;
+            border-radius:15px;
+            animation:
+              hitFlash .35s ease;
+          ">
+
+          <b>
+            ${esc(p.name)}
+          </b>
+
+          <span>
+            ❤️ ${p.hp}
+          </span>
+
+          <div
+            style="
+              height:18px;
+              background:#171a2b;
+              border-radius:12px;
+              overflow:hidden;
+              margin-top:7px;
+            ">
+
+            <div
+              style="
+                width:${p.hp}%;
+                height:100%;
+                background:
+                  linear-gradient(
+                    90deg,
+                    #ff3b6b,
+                    #7b4dff
+                  );
+                transition:width .25s;
+              ">
+            </div>
+
+          </div>
+
+        </div>
+
+      `
+    ).join('');
+
+  $('#fightMsg').textContent=
+    fightState.message||'';
+
+}
+
+function fightMove(move){
+
+  socket.emit(
+    'fight:move',
+    move
+  );
+
+}
+
+socket.on(
+  'fight:state',
+  d=>{
+
+    fightState=d;
+
+    if(currentGame==='fight')
+      renderFight();
+
+    if(d.message)
+      toast(d.message);
+
+  }
+);
+
+
+/* =================================
+   END GAME
+================================= */
+
+function endGame(){
+  socket.emit('game:end');
+}
+
+
+/* =================================
+   GLOBAL BUTTONS
+================================= */
 
 Object.assign(
   window,
@@ -1578,17 +1857,22 @@ Object.assign(
     showRoom,
     goHome,
     copyCode,
+    sendPartyChat,
     guess,
     clearDraw,
     eraser,
     move,
     resetTTT,
-    newTruth,
-    newWould,
-    vote,
-    checkE,
+    truthDone,
+    wouldVote,
+    wouldNext,
+    reactionPick,
     qa,
+    checkE,
     chain,
+    bikeBoost,
+    fightMove,
+    endGame,
     renderGame
   }
 );
