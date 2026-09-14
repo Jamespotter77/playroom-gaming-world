@@ -1,169 +1,197 @@
-const socket = io({ transports: ['websocket', 'polling'] });
+const socket = io({ transports:['websocket','polling'] });
 
-let room = null;
-let myId = null;
-let currentGame = null;
-let ctx = null;
-let drawing = false;
-let erase = false;
+let room=null, myId=null, currentGame=null, gameTimer=null, ctx=null, drawing=false, erase=false;
 
-const $ = s => document.querySelector(s);
+const $=s=>document.querySelector(s);
 
-const games = {
-  doodle: ['DOODLE GUESS', '2–7 PLAYERS'],
-  ultimate: ['ULTIMATE TIC-TAC-TOE', '2 PLAYERS'],
-  truth: ['TRUTH OR DARE', '2–7 PLAYERS'],
-  would: ['WOULD YOU RATHER', '2–7 PLAYERS'],
-  emoji: ['EMOJI DECODE', '2–7 PLAYERS'],
-  quiz: ['QUICK QUIZ', '2–7 PLAYERS'],
-  reaction: ['REACTION RUSH', '2–7 PLAYERS'],
-  word: ['WORD CHAIN', '2–7 PLAYERS']
+const games={
+  doodle:['DOODLE GUESS','2–7 PLAYERS'],
+  ultimate:['ULTIMATE TIC-TAC-TOE','2 PLAYERS'],
+  truth:['TRUTH OR DARE','2–7 PLAYERS'],
+  would:['WOULD YOU RATHER','2–7 PLAYERS'],
+  emoji:['EMOJI DECODE','2–7 PLAYERS'],
+  quiz:['QUICK QUIZ','2–7 PLAYERS'],
+  reaction:['REACTION RUSH','2–7 PLAYERS'],
+  word:['WORD CHAIN','2–7 PLAYERS']
 };
 
-function toast(message) {
-  const el = $('#toast');
-  if (!el) return;
+const words=[
+  'CAT','DOG','PIZZA','GUITAR','ELEPHANT','ROCKET',
+  'CAKE','SUNGLASSES','BICYCLE','TIGER','ICE CREAM','CASTLE'
+];
 
-  el.textContent = message;
-  el.style.display = 'block';
+function toast(t){
+  const el=$('#toast');
+  if(!el)return;
+
+  el.textContent=t;
+  el.style.display='block';
 
   clearTimeout(window.toastTimer);
 
-  window.toastTimer = setTimeout(() => {
-    el.style.display = 'none';
-  }, 2500);
+  window.toastTimer=setTimeout(
+    ()=>el.style.display='none',
+    2200
+  );
 }
 
-function toggleJoin() {
-  $('#join')?.classList.toggle('hidden');
+function toggleJoin(){
+  $('#join').classList.toggle('hidden');
   $('#playerName')?.focus();
 }
 
-function createRoom() {
-  const name = $('#playerName')?.value.trim() || 'Player';
-
-  if (!socket.connected) {
-    toast('Connecting to server... Please wait.');
-    return;
-  }
-
-  socket.emit('room:create', { name });
+function createRoom(){
+  const n=$('#playerName').value.trim()||'Player';
+  socket.emit('room:create',{name:n});
 }
 
-function joinRoom() {
-  const name = $('#playerName')?.value.trim() || 'Player';
-  const code = $('#roomInput')?.value.trim().toUpperCase();
+function joinRoom(){
+  const n=$('#playerName').value.trim()||'Player';
+  const c=$('#roomInput').value.trim();
 
-  if (!code) {
-    toast('Enter the room code first.');
-    return;
+  if(!c){
+    return toast('Enter the room code first.');
   }
 
-  socket.emit('room:join', {
-    code,
-    name
+  socket.emit('room:join',{
+    code:c,
+    name:n
   });
 }
 
-function hideAll() {
-  $('#room')?.classList.add('hidden');
-  $('#play')?.classList.add('hidden');
+function hideAll(){
+  $('#room').classList.add('hidden');
+  $('#play').classList.add('hidden');
 }
 
-function showRoom() {
+function showRoom(){
+
   hideAll();
 
-  $('#room')?.classList.remove('hidden');
+  $('#room').classList.remove('hidden');
 
-  setTimeout(() => {
-    $('#room')?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start'
+  setTimeout(()=>{
+    $('#room').scrollIntoView({
+      behavior:'smooth',
+      block:'start'
     });
-  }, 100);
+  },80);
 }
 
-function goHome() {
+function goHome(){
+
   socket.emit('room:leave');
 
-  room = null;
-  currentGame = null;
+  room=null;
+  currentGame=null;
 
   hideAll();
 
   window.scrollTo({
-    top: 0,
-    behavior: 'smooth'
+    top:0,
+    behavior:'smooth'
   });
 }
 
-function escapeHtml(value) {
-  return String(value).replace(/[&<>'"]/g, c => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    "'": '&#39;',
-    '"': '&quot;'
-  }[c]));
+function renderPlayers(){
+
+  if(!room)return;
+
+  $('#players').innerHTML=
+    room.players.map(p=>`
+      <div class="player">
+
+        <span class="av">
+          ${p.avatar}
+        </span>
+
+        <b>
+          ${escapeHtml(p.name)}
+        </b>
+
+        ${
+          p.id===room.host
+          ? ' <small>HOST</small>'
+          : ''
+        }
+
+        <span style="margin-left:auto">
+          🏆 ${p.score||0}
+        </span>
+
+      </div>
+    `).join('');
 }
 
-function renderPlayers() {
-  if (!room || !$('#players')) return;
+function escapeHtml(v){
 
-  $('#players').innerHTML = room.players.map(player => `
-    <div class="player">
-      <span class="av">${player.avatar}</span>
-      <b>${escapeHtml(player.name)}</b>
-      ${player.id === room.host ? '<small>HOST</small>' : ''}
-      <span style="margin-left:auto">
-        🏆 ${player.score || 0}
-      </span>
-    </div>
-  `).join('');
+  return String(v).replace(
+    /[&<>'"]/g,
+    c=>({
+      '&':'&amp;',
+      '<':'&lt;',
+      '>':'&gt;',
+      "'":'&#39;',
+      '"':'&quot;'
+    }[c])
+  );
 }
 
-function startGame(game) {
-  if (!room) {
-    toast('Create or join a room first ✨');
-    return;
+function startGame(g){
+
+  if(!room){
+    return toast(
+      'Create or join a room first ✨'
+    );
   }
 
-  if (myId !== room.host) {
-    toast('Only the HOST can start the game.');
-    return;
+  if(!socket.connected){
+    return toast(
+      'Connecting to game server… please wait 1 second.'
+    );
   }
 
-  if (!socket.connected) {
-    toast('Connecting to game server...');
-    return;
-  }
+  toast(
+    'Starting '+
+    (games[g]?.[0]||'game')+
+    '… 🎮'
+  );
 
-  socket.emit('game:start', { game }, response => {
-    if (response && !response.ok) {
-      toast(response.message || 'Could not start game.');
+  socket.emit(
+    'game:start',
+    {game:g},
+    ack=>{
+
+      if(
+        ack &&
+        !ack.ok
+      ){
+        toast(
+          ack.message||
+          'Could not start the game.'
+        );
+      }
+
     }
-  });
+  );
 }
 
-function copyCode() {
-  const code = $('#code')?.textContent?.trim();
+function copyCode(){
 
-  if (!code || code === '------') {
-    toast('No room code available.');
-    return;
-  }
+  const code=$('#code').textContent;
 
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(code)
-      .then(() => toast('Room code copied! 🎉'))
-      .catch(() => toast('Room code: ' + code));
-  } else {
-    toast('Room code: ' + code);
-  }
+  navigator.clipboard
+    ?.writeText(code)
+    .then(
+      ()=>toast('Room code copied!')
+    )
+    .catch(
+      ()=>toast('Room code: '+code)
+    );
 }
 
-function addScore(points) {
-  socket.emit('score:add', Number(points) || 0);
+function addScore(n){
+  socket.emit('score:add',n);
 }
 
 
@@ -171,148 +199,223 @@ function addScore(points) {
    CONNECTION
 ========================= */
 
-socket.on('connect', () => {
-  myId = socket.id;
-  toast('Connected to PlayRoom ⚡');
-});
+socket.on(
+  'connect',
+  ()=>{
+    myId=socket.id;
+    toast('Connected to PlayRoom ⚡');
+  }
+);
 
-socket.on('connect_error', () => {
-  toast('Could not connect to game server. Refresh once.');
-});
+socket.on(
+  'connect_error',
+  ()=>{
+    toast(
+      'Could not connect to the game server. Refresh once.'
+    );
+  }
+);
 
 
 /* =========================
    ROOM
 ========================= */
 
-socket.on('room:created', data => {
-  if (data?.code) {
-    $('#code').textContent = data.code;
-    toast('Room created! Share this code 🎉');
+socket.on(
+  'room:created',
+  ({code})=>{
+    $('#code').textContent=code;
+
+    toast(
+      'Room created! Share this code 🎉'
+    );
   }
-});
+);
 
-socket.on('room:state', data => {
-  room = data;
 
-  if (data?.code) {
-    $('#code').textContent = data.code;
-  }
+/*
+ IMPORTANT:
+ Do NOT call showRoom() while a game
+ is already running.
+*/
 
-  renderPlayers();
-  showRoom();
-});
+socket.on(
+  'room:state',
+  r=>{
 
-socket.on('room:error', message => {
-  toast(message);
-});
+    room=r;
 
-socket.on('game:error', message => {
-  toast(message);
-});
+    $('#code').textContent=r.code;
 
-socket.on('scores:state', scores => {
-  if (!room) return;
+    renderPlayers();
 
-  const scoreMap = new Map(
-    scores.map(player => [player.id, player.score])
-  );
-
-  room.players.forEach(player => {
-    if (scoreMap.has(player.id)) {
-      player.score = scoreMap.get(player.id);
+    if(!currentGame){
+      showRoom();
     }
-  });
 
-  renderPlayers();
-
-  const me = scores.find(player => player.id === myId);
-
-  if (me && $('#liveScore')) {
-    $('#liveScore').textContent = '🏆 ' + me.score;
   }
-});
+);
+
+socket.on(
+  'room:error',
+  toast
+);
+
+socket.on(
+  'game:error',
+  toast
+);
+
+socket.on(
+  'scores:state',
+  scores=>{
+
+    if(!room)return;
+
+    const map=
+      new Map(
+        scores.map(
+          x=>[x.id,x.score]
+        )
+      );
+
+    room.players.forEach(
+      p=>{
+        p.score=
+          map.get(p.id)??p.score;
+      }
+    );
+
+    renderPlayers();
+
+    const me=
+      scores.find(
+        x=>x.id===myId
+      );
+
+    if(me){
+      $('#liveScore').textContent=
+        '🏆 '+me.score;
+    }
+
+  }
+);
 
 
 /* =========================
    GAME START
 ========================= */
 
-socket.on('game:started', game => {
-  const name = typeof game === 'string'
-    ? game
-    : game?.game;
+socket.on(
+  'game:started',
+  g=>{
 
-  if (!games[name]) {
-    toast('Game could not be loaded.');
-    return;
+    const game=
+      typeof g==='string'
+      ?g
+      :(g?.game||g?.name);
+
+    if(!games[game]){
+      return toast(
+        'Game could not be loaded. Refresh once.'
+      );
+    }
+
+    renderGame(game);
+
   }
+);
 
-  renderGame(name);
-});
+socket.on(
+  'game:ended',
+  msg=>{
 
-socket.on('game:ended', message => {
-  toast(message || 'Game ended');
+    toast(
+      msg||'Game ended'
+    );
 
-  currentGame = null;
+    currentGame=null;
 
-  setTimeout(() => {
     showRoom();
-  }, 500);
-});
+
+  }
+);
 
 
-function renderGame(game) {
-  if (!games[game]) {
-    toast('Unknown game.');
-    return;
+/* =========================
+   RENDER GAME
+========================= */
+
+function renderGame(g){
+
+  g=
+    typeof g==='string'
+    ?g
+    :(g?.game||g?.name);
+
+  if(!games[g]){
+    return toast(
+      'Unknown game. Please try again.'
+    );
   }
 
-  currentGame = game;
+  currentGame=g;
 
   hideAll();
 
-  $('#play')?.classList.remove('hidden');
+  $('#play').classList.remove('hidden');
 
-  if ($('#gameName')) {
-    $('#gameName').textContent = games[game][0];
-  }
+  $('#gameName').textContent=
+    games[g][0];
 
-  if ($('#gameMode')) {
-    $('#gameMode').textContent = games[game][1];
-  }
+  $('#gameMode').textContent=
+    games[g][1];
 
-  if ($('#liveScore')) {
-    const me = room?.players.find(p => p.id === myId);
+  $('#liveScore').textContent=
+    '🏆 '+
+    (
+      room?.players.find(
+        p=>p.id===myId
+      )?.score||0
+    );
 
-    $('#liveScore').textContent =
-      '🏆 ' + (me?.score || 0);
-  }
+  let html='';
 
-  let html = '';
+  if(g==='doodle')
+    html=doodle();
 
-  if (game === 'doodle') html = doodle();
-  if (game === 'ultimate') html = ultimate();
-  if (game === 'truth') html = truth();
-  if (game === 'would') html = would();
-  if (game === 'emoji') html = emoji();
-  if (game === 'quiz') html = quiz();
-  if (game === 'reaction') html = reaction();
-  if (game === 'word') html = word();
+  if(g==='ultimate')
+    html=ultimate();
 
-  $('#gameArea').innerHTML = html;
+  if(g==='truth')
+    html=truth();
 
-  if (game === 'doodle') {
+  if(g==='would')
+    html=would();
+
+  if(g==='emoji')
+    html=emoji();
+
+  if(g==='quiz')
+    html=quiz();
+
+  if(g==='reaction')
+    html=reaction();
+
+  if(g==='word')
+    html=word();
+
+  $('#gameArea').innerHTML=html;
+
+  if(g==='doodle')
     initDoodle();
-  }
 
-  if (game === 'reaction') {
+  if(g==='reaction')
     initReaction();
-  }
 
-  if (game === 'would') {
+  if(g==='would')
     newWould();
-  }
+
 }
 
 
@@ -320,15 +423,29 @@ function renderGame(game) {
    DOODLE GUESS
 ========================= */
 
-function doodle() {
+function doodle(){
+
   return `
     <div class="gameBox">
 
       <div class="round">
-        <span id="dRound">ROUND 1 / 5</span>
-        <span class="timer" id="tm">60</span>
-        <span id="role">WAITING...</span>
+
+        <span id="dRound">
+          ROUND 1 / 5
+        </span>
+
+        <span
+          class="timer"
+          id="tm">
+          60
+        </span>
+
+        <span id="role">
+          WAITING…
+        </span>
+
       </div>
+
 
       <div class="doodle">
 
@@ -340,31 +457,49 @@ function doodle() {
             height="430">
           </canvas>
 
-          <div class="word" id="wordBox">
+          <div
+            class="word"
+            id="wordBox">
+
             Your word:
-            <b id="word">Waiting...</b>
+            <b id="word">
+              Waiting…
+            </b>
+
           </div>
 
         </div>
 
+
         <div class="chat">
 
-          <b>💬 LIVE GUESSES</b>
+          <b>
+            💬 LIVE GUESSES
+          </b>
 
-          <div class="chatLog" id="log">
+          <div
+            class="chatLog"
+            id="log">
+
             <div class="chatLine">
-              Waiting for the drawer...
+              Waiting for the drawer…
             </div>
+
           </div>
+
 
           <div class="chatInput">
 
             <input
               id="guess"
-              placeholder="Guess the word..."
-              onkeydown="if(event.key==='Enter') guess()">
+              placeholder="Guess the word…"
+              onkeydown="
+                if(event.key==='Enter')guess()
+              "
+            >
 
-            <button onclick="guess()">
+            <button
+              onclick="guess()">
               Send
             </button>
 
@@ -374,13 +509,18 @@ function doodle() {
 
       </div>
 
+
       <div class="toolbar">
 
-        <button id="clearBtn" onclick="clearDraw()">
+        <button
+          id="clearBtn"
+          onclick="clearDraw()">
           Clear
         </button>
 
-        <button id="eraserBtn" onclick="eraser()">
+        <button
+          id="eraserBtn"
+          onclick="eraser()">
           🧽 Eraser
         </button>
 
@@ -389,7 +529,8 @@ function doodle() {
           type="range"
           min="2"
           max="24"
-          value="6">
+          value="6"
+        >
 
         <button
           class="neon small"
@@ -404,117 +545,134 @@ function doodle() {
 }
 
 
-function initDoodle() {
+function initDoodle(){
 
-  drawing = false;
-  erase = false;
-  ctx = null;
+  ctx=null;
+  drawing=false;
+  erase=false;
 
-  const canvas = $('#cv');
+  const c=$('#cv');
 
-  if (!canvas) return;
+  if(!c)return;
 
-  ctx = canvas.getContext('2d');
+  ctx=c.getContext('2d');
 
-  ctx.fillStyle = 'white';
+  ctx.fillStyle='white';
+
   ctx.fillRect(
     0,
     0,
-    canvas.width,
-    canvas.height
+    c.width,
+    c.height
   );
 
-  canvas.onpointerdown = event => {
+  ctx.beginPath();
 
-    if ($('#role')?.dataset.drawer !== 'yes') {
+
+  c.onpointerdown=e=>{
+
+    if(
+      $('#role').dataset.drawer!=='yes'
+    ){
       return;
     }
 
-    drawing = true;
+    drawing=true;
 
-    stroke(event);
+    stroke(e);
+
   };
 
-  canvas.onpointerup = () => {
-    drawing = false;
+
+  c.onpointerup=()=>{
+    drawing=false;
     ctx?.beginPath();
   };
 
-  canvas.onpointerleave = () => {
-    drawing = false;
+
+  c.onpointerleave=()=>{
+    drawing=false;
     ctx?.beginPath();
   };
 
-  canvas.onpointermove = event => {
 
-    if (drawing) {
-      stroke(event);
+  c.onpointermove=e=>{
+
+    if(drawing){
+      stroke(e);
     }
 
   };
+
 }
 
 
-function stroke(event) {
+function stroke(e){
 
-  if (!ctx) return;
+  if(!ctx)return;
 
-  const canvas = $('#cv');
+  const c=$('#cv');
 
-  const rect =
-    canvas.getBoundingClientRect();
+  const r=
+    c.getBoundingClientRect();
 
-  const x =
-    (event.clientX - rect.left) *
-    canvas.width /
-    rect.width;
+  const x=
+    (e.clientX-r.left)*
+    c.width/
+    r.width;
 
-  const y =
-    (event.clientY - rect.top) *
-    canvas.height /
-    rect.height;
+  const y=
+    (e.clientY-r.top)*
+    c.height/
+    r.height;
 
-  const width =
-    Number($('#brush')?.value || 6);
+  ctx.lineWidth=
+    +$('#brush').value;
 
-  const color =
-    erase ? 'white' : '#111';
+  ctx.lineCap='round';
 
-  ctx.lineWidth = width;
-  ctx.lineCap = 'round';
-  ctx.strokeStyle = color;
+  ctx.strokeStyle=
+    erase?'white':'#111';
 
-  ctx.lineTo(x, y);
+  ctx.lineTo(x,y);
+
   ctx.stroke();
 
   ctx.beginPath();
-  ctx.moveTo(x, y);
 
-  socket.emit('draw:stroke', {
-    x,
-    y,
-    w: width,
-    color
-  });
+  ctx.moveTo(x,y);
+
+  socket.emit(
+    'draw:stroke',
+    {
+      x,
+      y,
+      w:ctx.lineWidth,
+      color:ctx.strokeStyle
+    }
+  );
+
 }
 
 
-function clearDraw() {
+function clearDraw(){
 
-  if ($('#role')?.dataset.drawer !== 'yes') {
+  if(
+    $('#role').dataset.drawer!=='yes'
+  ){
     return;
   }
 
-  if (ctx) {
+  ctx?.clearRect(
+    0,
+    0,
+    $('#cv').width,
+    $('#cv').height
+  );
 
-    ctx.clearRect(
-      0,
-      0,
-      $('#cv').width,
-      $('#cv').height
-    );
+  if(ctx){
 
-    ctx.fillStyle = 'white';
+    ctx.fillStyle='white';
 
     ctx.fillRect(
       0,
@@ -524,223 +682,296 @@ function clearDraw() {
     );
 
     ctx.beginPath();
+
   }
 
   socket.emit('draw:clear');
+
 }
 
 
-function eraser() {
+function eraser(){
 
-  if ($('#role')?.dataset.drawer !== 'yes') {
+  if(
+    $('#role').dataset.drawer!=='yes'
+  ){
     return;
   }
 
-  erase = !erase;
+  erase=!erase;
 
   toast(
     erase
-      ? 'Eraser ON 🧽'
-      : 'Pen ON ✏️'
+    ?'Eraser on'
+    :'Pen on'
   );
+
 }
 
 
-function guess() {
+function guess(){
 
-  const input = $('#guess');
+  const i=$('#guess');
 
-  if (!input) return;
+  const v=i.value.trim();
 
-  const value = input.value.trim();
+  if(!v)return;
 
-  if (!value) return;
+  socket.emit(
+    'doodle:guess',
+    {
+      guess:v
+    }
+  );
 
-  socket.emit('doodle:guess', {
-    guess: value
-  });
+  i.value='';
 
-  input.value = '';
 }
 
 
-socket.on('doodle:state', data => {
+socket.on(
+  'doodle:state',
+  d=>{
 
-  if (currentGame !== 'doodle') return;
+    if(
+      currentGame!=='doodle'
+    ){
+      return;
+    }
 
-  $('#dRound').textContent =
-    `ROUND ${data.round} / ${data.totalRounds}`;
+    $('#dRound').textContent=
+      `ROUND ${d.round} / ${d.totalRounds}`;
 
-  $('#tm').textContent =
-    data.timeLeft;
+    $('#tm').textContent=
+      d.timeLeft;
 
-  const role = $('#role');
+    const role=$('#role');
 
-  role.dataset.drawer =
-    data.drawerId === myId
-      ? 'yes'
-      : 'no';
+    role.dataset.drawer=
+      d.drawerId===myId
+      ?'yes'
+      :'no';
 
-  role.textContent =
-    data.drawerId === myId
-      ? '✏️ YOU ARE DRAWING'
-      : `🎯 ${escapeHtml(data.drawerName)} IS DRAWING`;
+    role.textContent=
+      d.drawerId===myId
+      ?'✏️ YOU ARE DRAWING'
+      :`🎯 ${escapeHtml(d.drawerName)} IS DRAWING`;
 
-  $('#word').textContent =
-    data.word || 'Guess it!';
+    $('#word').textContent=
+      d.word||'Guess it!';
 
-  $('#guess').disabled =
-    data.drawerId === myId;
+    $('#guess').disabled=
+      d.drawerId===myId;
 
-  $('#clearBtn').disabled =
-    data.drawerId !== myId;
+    $('#clearBtn').disabled=
+      d.drawerId!==myId;
 
-  $('#eraserBtn').disabled =
-    data.drawerId !== myId;
+    $('#eraserBtn').disabled=
+      d.drawerId!==myId;
 
-  $('#brush').disabled =
-    data.drawerId !== myId;
+    $('#brush').disabled=
+      d.drawerId!==myId;
 
-  if (data.drawerId === myId) {
-    toast('Your turn to draw! ✏️');
+    if(
+      d.drawerId===myId
+    ){
+      toast(
+        'Your turn to draw! ✏️'
+      );
+    }
+
   }
-});
+);
 
 
-socket.on('doodle:tick', time => {
+socket.on(
+  'doodle:tick',
+  n=>{
 
-  if ($('#tm')) {
-    $('#tm').textContent = time;
+    if($('#tm')){
+      $('#tm').textContent=n;
+    }
+
   }
-
-});
-
-
-socket.on('doodle:guess', data => {
-
-  const log = $('#log');
-
-  if (!log) return;
-
-  log.innerHTML += `
-    <div class="chatLine">
-      ${escapeHtml(data.name)}:
-      ${escapeHtml(data.guess)}
-    </div>
-  `;
-
-  log.scrollTop = log.scrollHeight;
-});
+);
 
 
-socket.on('doodle:correct', data => {
+socket.on(
+  'doodle:guess',
+  d=>{
 
-  const log = $('#log');
+    if(!$('#log'))return;
 
-  if (log) {
-
-    log.innerHTML += `
+    $('#log').innerHTML+=`
       <div class="chatLine">
-        🎉 <b>
-          ${escapeHtml(data.name)}
-          got it!
-          Word: ${escapeHtml(data.word)}
-        </b>
+        ${escapeHtml(d.name)}:
+        ${escapeHtml(d.guess)}
       </div>
     `;
 
-  }
-
-  toast(`${data.name} guessed it! +100`);
-});
-
-
-socket.on('doodle:message', message => {
-
-  const log = $('#log');
-
-  if (log) {
-
-    log.innerHTML += `
-      <div class="chatLine">
-        ${escapeHtml(message)}
-      </div>
-    `;
+    $('#log').scrollTop=
+      $('#log').scrollHeight;
 
   }
+);
 
-});
+
+socket.on(
+  'doodle:correct',
+  d=>{
+
+    if($('#log')){
+
+      $('#log').innerHTML+=`
+        <div class="chatLine">
+          🎉 <b>
+            ${escapeHtml(d.name)}
+            got it!
+            Word:
+            ${escapeHtml(d.word)}
+          </b>
+        </div>
+      `;
+
+    }
+
+    toast(
+      `${d.name} guessed it! +100`
+    );
+
+  }
+);
 
 
-socket.on('doodle:finished', () => {
+socket.on(
+  'doodle:message',
+  m=>{
 
-  toast('Doodle finished! 🎉');
+    if($('#log')){
 
-  setTimeout(() => {
+      $('#log').innerHTML+=`
+        <div class="chatLine">
+          ${escapeHtml(m)}
+        </div>
+      `;
+
+    }
+
+  }
+);
+
+
+socket.on(
+  'doodle:finished',
+  ()=>{
+
+    toast(
+      'Doodle finished! 🎉'
+    );
+
+    currentGame=null;
+
     showRoom();
-  }, 800);
 
-});
-
-
-socket.on('draw:stroke', data => {
-
-  if (!ctx) return;
-
-  ctx.lineWidth = data.w;
-  ctx.lineCap = 'round';
-  ctx.strokeStyle = data.color;
-
-  ctx.lineTo(data.x, data.y);
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(data.x, data.y);
-
-});
+  }
+);
 
 
-socket.on('draw:clear', () => {
+socket.on(
+  'draw:stroke',
+  d=>{
 
-  if (!ctx) return;
+    if(!ctx)return;
 
-  ctx.fillStyle = 'white';
+    ctx.lineWidth=d.w;
 
-  ctx.fillRect(
-    0,
-    0,
-    $('#cv').width,
-    $('#cv').height
-  );
+    ctx.lineCap='round';
 
-  ctx.beginPath();
+    ctx.strokeStyle=d.color;
 
-});
+    ctx.lineTo(
+      d.x,
+      d.y
+    );
+
+    ctx.stroke();
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      d.x,
+      d.y
+    );
+
+  }
+);
+
+
+socket.on(
+  'draw:clear',
+  ()=>{
+
+    if(ctx){
+
+      ctx.fillStyle='white';
+
+      ctx.fillRect(
+        0,
+        0,
+        $('#cv').width,
+        $('#cv').height
+      );
+
+      ctx.beginPath();
+
+    }
+
+  }
+);
 
 
 /* =========================
    TIC TAC TOE
 ========================= */
 
-function ultimate() {
+function ultimate(){
 
   return `
     <div class="gameBox">
 
       <div class="round">
-        <span>ULTIMATE TIC-TAC-TOE</span>
-        <span id="ut">X'S TURN</span>
+
+        <span>
+          ULTIMATE TIC-TAC-TOE
+        </span>
+
+        <span id="ut">
+          X'S TURN
+        </span>
+
       </div>
+
 
       <div
         class="ttt"
         id="ttt">
+
+        ${Array(9)
+          .fill('')
+          .map(
+            (_,i)=>
+              `<button onclick="move(${i})"></button>`
+          )
+          .join('')
+        }
+
       </div>
+
 
       <div style="text-align:center">
 
         <p id="tttInfo">
-          Waiting for game...
+          Waiting for game…
         </p>
 
         <button
@@ -753,96 +984,101 @@ function ultimate() {
 
     </div>
   `;
-}
-
-
-function move(index) {
-
-  socket.emit('ttt:move', {
-    index
-  });
 
 }
 
 
-function resetTTT() {
+function move(i){
 
-  socket.emit('ttt:reset');
+  socket.emit(
+    'ttt:move',
+    {
+      index:i
+    }
+  );
 
 }
 
 
-socket.on('ttt:state', state => {
+function resetTTT(){
 
-  if (currentGame !== 'ultimate') return;
+  socket.emit(
+    'ttt:reset'
+  );
 
-  paintTTT(state);
+}
 
-  if (state.winner) {
 
-    toast(
-      state.winner === 'DRAW'
-        ? 'Draw! 🤝'
-        : `${state.winner} wins! 🏆`
+socket.on(
+  'ttt:state',
+  t=>{
+
+    if(
+      currentGame!=='ultimate'
+    ){
+      return;
+    }
+
+    paintTTT(t);
+
+    if(t.winner){
+
+      toast(
+        t.winner==='DRAW'
+        ?'Draw! 🤝'
+        :`${t.winner} wins! 🏆`
+      );
+
+    }
+
+  }
+);
+
+
+function paintTTT(t){
+
+  const el=$('#ttt');
+
+  if(!el)return;
+
+  el.innerHTML=
+    t.board.map(
+      (x,i)=>
+        `<button
+          onclick="move(${i})"
+          ${x||t.winner?'disabled':''}>
+          ${x}
+        </button>`
+    ).join('');
+
+
+  const me=
+    t.players?.indexOf(myId);
+
+  const symbol=
+    me===0
+    ?'X'
+    :me===1
+      ?'O'
+      :'-';
+
+
+  $('#ut').textContent=
+    t.winner
+    ?(
+      t.winner==='DRAW'
+      ?'DRAW GAME'
+      :`${t.winner} WINS!`
+    )
+    :(
+      t.turn===symbol
+      ?'YOUR TURN ('+symbol+')'
+      :`${t.turn}'S TURN`
     );
 
-  }
 
-});
-
-
-function paintTTT(state) {
-
-  const board = $('#ttt');
-
-  if (!board) return;
-
-  board.innerHTML =
-    state.board.map((value, index) => `
-      <button
-        onclick="move(${index})"
-        ${value || state.winner ? 'disabled' : ''}>
-        ${value}
-      </button>
-    `).join('');
-
-  const playerIndex =
-    state.players?.indexOf(myId);
-
-  const symbol =
-    playerIndex === 0
-      ? 'X'
-      : playerIndex === 1
-        ? 'O'
-        : '-';
-
-  if ($('#ut')) {
-
-    $('#ut').textContent =
-      state.winner
-        ? (
-          state.winner === 'DRAW'
-            ? 'DRAW GAME'
-            : `${state.winner} WINS!`
-        )
-        : (
-          state.turn === symbol
-            ? `YOUR TURN (${symbol})`
-            : `${state.turn}'S TURN`
-        );
-  }
-
-  if ($('#tttInfo')) {
-
-    $('#tttInfo').textContent =
-      symbol === '-'
-        ? 'You are a spectator.'
-        : `You are ${symbol}. ${
-            state.turn === symbol
-              ? 'Your turn!'
-              : 'Wait for the other player.'
-          }`;
-  }
+  $('#tttInfo').textContent=
+    `You are ${symbol}. Only the correct player's turn can move.`;
 
 }
 
@@ -851,23 +1087,28 @@ function paintTTT(state) {
    TRUTH OR DARE
 ========================= */
 
-const truths = [
-  ['TRUTH', 'What is your most useless talent?'],
-  ['DARE', 'Do your best celebrity impression for 20 seconds.'],
-  ['TRUTH', 'What is the funniest thing you have done to impress someone?'],
-  ['DARE', 'Talk like a robot until your next turn.'],
-  ['TRUTH', 'Who would survive longest in a zombie apocalypse?'],
-  ['DARE', 'Make your weirdest face for 10 seconds.']
+const truths=[
+  ['TRUTH','What is your most useless talent?'],
+  ['DARE','Do your best celebrity impression for 20 seconds.'],
+  ['TRUTH','What is the funniest thing you have done to impress someone?'],
+  ['DARE','Talk like a robot until your next turn.'],
+  ['TRUTH','Who would survive longest in a zombie apocalypse?'],
+  ['DARE','Make your weirdest face for 10 seconds.']
 ];
 
-function truth() {
+
+function truth(){
 
   return `
     <div class="fun">
 
-      <div class="emoji">🎭</div>
+      <div class="emoji">
+        🎭
+      </div>
 
-      <div class="eyebrow" id="ttype">
+      <div
+        class="eyebrow"
+        id="ttype">
         TRUTH
       </div>
 
@@ -883,16 +1124,22 @@ function truth() {
 
     </div>
   `;
+
 }
 
 
-function newTruth() {
+function newTruth(){
 
-  const card =
-    truths[Math.floor(Math.random() * truths.length)];
+  const x=
+    truths[
+      Math.floor(
+        Math.random()*truths.length
+      )
+    ];
 
-  $('#ttype').textContent = card[0];
-  $('#tp').textContent = card[1];
+  $('#ttype').textContent=x[0];
+
+  $('#tp').textContent=x[1];
 
 }
 
@@ -901,71 +1148,77 @@ function newTruth() {
    WOULD YOU RATHER
 ========================= */
 
-const wouldCards = [
-  ['Have unlimited money', 'Have unlimited free time'],
-  ['Fly', 'Be invisible'],
-  ['Live without music', 'Live without movies'],
-  ['Always be early', 'Always be late']
+const wr=[
+  ['Have unlimited money','Have unlimited free time'],
+  ['Fly','Be invisible'],
+  ['Never use social media','Never watch movies'],
+  ['Always be early','Always be late']
 ];
 
-function would() {
+
+function would(){
 
   return `
     <div class="fun">
 
-      <div class="emoji">🤔</div>
+      <div class="emoji">
+        🤔
+      </div>
 
-      <h3>WOULD YOU RATHER?</h3>
+      <h3>
+        Would you rather…
+      </h3>
 
       <div class="choices">
 
         <button
-          id="w1"
-          onclick="vote(1)">
-          Option A
+          id="wa"
+          onclick="vote($('#wa').textContent)">
         </button>
 
         <button
-          id="w2"
-          onclick="vote(2)">
-          Option B
+          id="wb"
+          onclick="vote($('#wb').textContent)">
         </button>
 
       </div>
 
+      <p id="wv"></p>
+
       <button
-        class="neon"
+        class="ghost"
         onclick="newWould()">
-        NEW QUESTION
+        NEW CHOICE
       </button>
 
     </div>
   `;
+
 }
 
 
-function newWould() {
+function newWould(){
 
-  const card =
-    wouldCards[
-      Math.floor(Math.random() * wouldCards.length)
+  const x=
+    wr[
+      Math.floor(
+        Math.random()*wr.length
+      )
     ];
 
-  if ($('#w1')) $('#w1').textContent = card[0];
-  if ($('#w2')) $('#w2').textContent = card[1];
+  $('#wa').textContent=x[0];
+
+  $('#wb').textContent=x[1];
+
+  $('#wv').textContent='';
 
 }
 
 
-function vote(option) {
+function vote(x){
 
-  toast(
-    option === 1
-      ? 'You chose A 👍'
-      : 'You chose B 👍'
-  );
-
-  addScore(10);
+  $('#wv').textContent=
+    'You picked '+x+' 🎉';
 
 }
 
@@ -974,39 +1227,44 @@ function vote(option) {
    EMOJI
 ========================= */
 
-const emojiCards = [
-  ['🐱👑', 'CAT KING'],
-  ['🍕❤️', 'LOVE PIZZA'],
-  ['🚀🌙', 'MOON ROCKET'],
-  ['☀️🏖️', 'SUNNY BEACH']
+const em=[
+  ['🐱👑','cat king'],
+  ['🌧️☀️','weather'],
+  ['🍕❤️','love pizza'],
+  ['🚀🌙','moon rocket'],
+  ['🐝🍯','honey bee']
 ];
 
-function emoji() {
 
-  const card =
-    emojiCards[
-      Math.floor(Math.random() * emojiCards.length)
+function emoji(){
+
+  const x=
+    em[
+      Math.floor(
+        Math.random()*em.length
+      )
     ];
 
   return `
     <div class="fun">
 
       <div class="emoji">
-        ${card[0]}
+        ${x[0]}
       </div>
 
       <h3>
-        Guess the phrase!
+        What does this mean?
       </h3>
 
       <input
         class="answer"
-        id="ei"
-        placeholder="Your answer">
+        id="ea"
+        placeholder="Type your answer"
+      >
 
       <button
         class="neon"
-        onclick="checkE('${card[1]}')">
+        onclick="checkE('${x[1]}')">
         CHECK
       </button>
 
@@ -1014,28 +1272,24 @@ function emoji() {
 
     </div>
   `;
+
 }
 
 
-function checkE(answer) {
+function checkE(a){
 
-  const input =
-    $('#ei')?.value.trim().toUpperCase();
+  const v=
+    $('#ea').value
+      .trim()
+      .toLowerCase();
 
-  if (!input) return;
+  $('#er').textContent=
+    v===a
+    ?'🎉 Correct! +100'
+    :'❌ Try again!';
 
-  if (input === answer) {
-
-    $('#er').textContent =
-      '🎉 Correct! +50';
-
-    addScore(50);
-
-  } else {
-
-    $('#er').textContent =
-      '❌ Try again!';
-
+  if(v===a){
+    addScore(100);
   }
 
 }
@@ -1045,159 +1299,180 @@ function checkE(answer) {
    QUIZ
 ========================= */
 
-const quizCards = [
-  ['What is 5 + 7?', '12'],
-  ['Which planet is known as the Red Planet?', 'MARS'],
-  ['How many days are in a week?', '7'],
-  ['What is the capital of France?', 'PARIS']
+const qs=[
+  [
+    'Which planet is called the Red Planet?',
+    ['Mars','Venus','Jupiter','Mercury'],
+    0
+  ],
+  [
+    'How many sides does a hexagon have?',
+    ['5','6','7','8'],
+    1
+  ],
+  [
+    'What do bees make?',
+    ['Milk','Honey','Bread','Juice'],
+    1
+  ],
+  [
+    'Largest ocean?',
+    ['Atlantic','Indian','Pacific','Arctic'],
+    2
+  ]
 ];
 
-function quiz() {
 
-  const card =
-    quizCards[
-      Math.floor(Math.random() * quizCards.length)
+function quiz(){
+
+  const q=
+    qs[
+      Math.floor(
+        Math.random()*qs.length
+      )
     ];
 
   return `
     <div class="fun">
 
-      <div class="emoji">🧠</div>
+      <div class="eyebrow">
+        BRAIN RUSH
+      </div>
 
       <h3>
-        ${card[0]}
+        ${q[0]}
       </h3>
 
-      <input
-        class="answer"
-        id="qi"
-        placeholder="Your answer">
+      <div class="quizChoices">
 
-      <button
-        class="neon"
-        onclick="qa('${card[1]}')">
-        ANSWER
-      </button>
+        ${
+          q[1].map(
+            (x,i)=>
+              `<button
+                onclick="qa(${i},${q[2]})">
+                ${x}
+              </button>`
+          ).join('')
+        }
+
+      </div>
 
       <p id="qr"></p>
 
+      <button
+        class="ghost"
+        onclick="renderGame('quiz')">
+        NEXT QUESTION
+      </button>
+
     </div>
   `;
+
 }
 
 
-function qa(answer) {
+function qa(i,c){
 
-  const input =
-    $('#qi')?.value.trim().toUpperCase();
+  $('#qr').textContent=
+    i===c
+    ?'🎉 Correct! +100'
+    :'❌ Wrong!';
 
-  if (!input) return;
-
-  if (input === answer.toUpperCase()) {
-
-    $('#qr').textContent =
-      '🎉 Correct! +50';
-
-    addScore(50);
-
-  } else {
-
-    $('#qr').textContent =
-      '❌ Wrong answer!';
-
+  if(i===c){
+    addScore(100);
   }
 
 }
 
 
 /* =========================
-   REACTION RUSH
+   REACTION
 ========================= */
 
-function reaction() {
+function reaction(){
 
   return `
-    <div class="fun">
+    <div class="gameBox">
 
-      <div class="emoji">⚡</div>
+      <div class="round">
 
-      <h3>
-        REACTION RUSH
-      </h3>
+        <span>
+          REACTION RUSH
+        </span>
 
-      <div
-        class="reaction"
-        id="reaction">
-        WAIT...
+        <span>
+          Wait for GREEN
+        </span>
+
       </div>
 
-      <p>
-        Wait for CLICK! then click as fast as possible.
-      </p>
+      <div
+        id="react"
+        class="reaction">
+        WAIT…
+      </div>
 
     </div>
   `;
+
 }
 
 
-function initReaction() {
+function initReaction(){
 
-  const reactionBox =
-    $('#reaction');
+  const r=$('#react');
 
-  if (!reactionBox) return;
+  const delay=
+    1200+
+    Math.random()*3500;
 
-  reactionBox.textContent = 'WAIT...';
+  r.onclick=()=>{
 
-  const delay =
-    1000 + Math.random() * 3000;
-
-  setTimeout(() => {
-
-    if (!$('#reaction')) return;
-
-    reactionBox.className =
-      'reaction go';
-
-    reactionBox.textContent =
-      'CLICK!';
-
-    reactionBox.dataset.start =
-      performance.now();
-
-  }, delay);
-
-  reactionBox.onclick = () => {
-
-    if (!reactionBox.dataset.start) {
-
-      toast('Too early! 😅');
-
-      return;
-
+    if(
+      !r.classList.contains('go')
+    ){
+      return toast(
+        'Too early! 😈'
+      );
     }
 
-    const time =
-      performance.now() -
-      Number(reactionBox.dataset.start);
+    const t=
+      performance.now()-
+      r.dataset.start;
 
     toast(
-      Math.round(time) +
-      ' ms! ⚡'
+      Math.round(t)+' ms! ⚡'
     );
 
     addScore(
       Math.max(
         10,
-        300 - Math.round(time / 5)
+        300-
+        Math.round(t/5)
       )
     );
 
-    reactionBox.dataset.start = '';
+    r.className='reaction';
+
+    r.textContent='WAIT…';
 
     initReaction();
 
   };
+
+
+  setTimeout(()=>{
+
+    r.className=
+      'reaction go';
+
+    r.textContent=
+      'CLICK!';
+
+    r.dataset.start=
+      performance.now();
+
+  },delay);
 
 }
 
@@ -1206,12 +1481,14 @@ function initReaction() {
    WORD CHAIN
 ========================= */
 
-function word() {
+function word(){
 
   return `
     <div class="fun">
 
-      <div class="emoji">🔤</div>
+      <div class="emoji">
+        🔤
+      </div>
 
       <h3>
         Word Chain
@@ -1230,7 +1507,8 @@ function word() {
       <input
         class="answer"
         id="wi"
-        placeholder="Your word">
+        placeholder="Your word"
+      >
 
       <button
         class="neon"
@@ -1242,74 +1520,75 @@ function word() {
 
     </div>
   `;
+
 }
 
 
-function chain() {
+function chain(){
 
-  const input = $('#wi');
+  const i=$('#wi');
 
-  if (!input) return;
+  const v=i.value.trim();
 
-  const value =
-    input.value.trim();
+  if(!v)return;
 
-  if (!value) return;
-
-  const last =
+  const last=
     $('#chain')
       .textContent
       .trim()
       .slice(-1)
       .toLowerCase();
 
-  if (
-    value[0].toLowerCase() !== last
-  ) {
+  if(
+    v[0].toLowerCase()!==last
+  ){
 
-    $('#wr').textContent =
-      '❌ Start with ' +
+    $('#wr').textContent=
+      '❌ Start with '+
       last.toUpperCase();
 
-  } else {
+  }else{
 
-    $('#chain').textContent =
-      value.toUpperCase();
+    $('#chain').textContent=
+      v.toUpperCase();
 
-    $('#wr').textContent =
+    $('#wr').textContent=
       '🔥 Chain continues!';
 
     addScore(25);
 
   }
 
-  input.value = '';
+  i.value='';
 
 }
 
 
 /* =========================
-   INLINE BUTTON SUPPORT
+   BUTTON SUPPORT
 ========================= */
 
-Object.assign(window, {
-  createRoom,
-  joinRoom,
-  toggleJoin,
-  startGame,
-  showRoom,
-  goHome,
-  copyCode,
-  guess,
-  clearDraw,
-  eraser,
-  move,
-  resetTTT,
-  newTruth,
-  newWould,
-  vote,
-  checkE,
-  qa,
-  chain,
-  renderGame
-});
+Object.assign(
+  window,
+  {
+    createRoom,
+    joinRoom,
+    toggleJoin,
+    startGame,
+    showRoom,
+    goHome,
+    copyCode,
+    guess,
+    clearDraw,
+    eraser,
+    move,
+    resetTTT,
+    newTruth,
+    newWould,
+    vote,
+    checkE,
+    qa,
+    chain,
+    renderGame
+  }
+);
