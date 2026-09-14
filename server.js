@@ -1,37 +1,31 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const crypto = require('crypto');
+const express=require('express');
+const http=require('http');
+const {Server}=require('socket.io');
+const crypto=require('crypto');
 
-const app = express();
+const app=express();
+const server=http.createServer(app);
 
-const server = http.createServer(app);
-
-const io = new Server(server, {
-  cors: {
-    origin: true,
-    credentials: false
+const io=new Server(server,{
+  cors:{
+    origin:true
   }
 });
 
-const rooms = new Map();
-
-
-/* =========================
-   BASIC SETUP
-========================= */
+const rooms=new Map();
 
 app.use(express.static(__dirname));
 
-app.get('/health', (_req, res) => {
-  res.json({
-    ok: true,
-    service: 'PlayRoom'
-  });
+app.get('/health',(_,res)=>{
+  res.json({ok:true});
 });
 
 
-const WORDS = [
+/* =================================
+   GAME DATA
+================================= */
+
+const words=[
   'CAT',
   'DOG',
   'PIZZA',
@@ -50,278 +44,329 @@ const WORDS = [
   'FLOWER'
 ];
 
+const truths=[
+  ['TRUTH','What is your most useless talent?'],
+  ['DARE','Do your best celebrity impression for 20 seconds.'],
+  ['TRUTH','What is the funniest thing you have done to impress someone?'],
+  ['DARE','Talk like a robot until your next turn.'],
+  ['TRUTH','Who would survive longest in a zombie apocalypse?'],
+  ['DARE','Make your weirdest face for 10 seconds.']
+];
 
-function cleanName(value) {
+const wouldCards=[
+  ['Have unlimited money','Have unlimited free time'],
+  ['Fly','Be invisible'],
+  ['Never use social media','Never watch movies'],
+  ['Always be early','Always be late']
+];
 
-  return String(value || 'Player')
+const reactionThings=[
+  'GUITAR',
+  'PIZZA',
+  'BIKE',
+  'ROCKET',
+  'TIGER',
+  'CAKE'
+];
+
+
+/* =================================
+   HELPERS
+================================= */
+
+function cleanName(v){
+
+  return String(v||'Player')
     .trim()
-    .slice(0, 18) || 'Player';
+    .slice(0,18)||
+    'Player';
 
 }
 
+function newCode(){
 
-function makeCode() {
+  let c;
 
-  return crypto
-    .randomBytes(3)
-    .toString('hex')
-    .toUpperCase();
+  do{
 
-}
+    c=
+      crypto
+        .randomBytes(3)
+        .toString('hex')
+        .toUpperCase();
 
+  }while(rooms.has(c));
 
-function newCode() {
-
-  let code;
-
-  do {
-    code = makeCode();
-  } while (rooms.has(code));
-
-  return code;
+  return c;
 
 }
 
+function roomOf(socket){
 
-function getRoom(socket) {
-
-  if (!socket.room) {
-    return null;
-  }
-
-  return rooms.get(socket.room) || null;
+  return socket.room
+    ?rooms.get(socket.room)
+    :null;
 
 }
 
-
-function publicRoom(code, room) {
+function publicRoom(code,room){
 
   return {
+
     code,
-    host: room.host,
 
-    players: room.players.map(player => ({
-      id: player.id,
-      name: player.name,
-      avatar: player.avatar,
-      score: player.score
-    })),
+    host:
+      room.host,
 
-    game: room.game
-      ? room.game.name
-      : null
+    players:
+      room.players.map(
+        p=>({
+          id:p.id,
+          name:p.name,
+          avatar:p.avatar,
+          score:p.score
+        })
+      ),
+
+    game:
+      room.game?.name||
+      null
+
   };
 
 }
 
+function broadcastRoom(code){
 
-function broadcastRoom(code) {
+  const room=
+    rooms.get(code);
 
-  const room = rooms.get(code);
+  if(room){
 
-  if (!room) return;
+    io.to(code).emit(
+      'room:state',
+      publicRoom(code,room)
+    );
 
-  io.to(code).emit(
-    'room:state',
-    publicRoom(code, room)
-  );
+  }
 
 }
 
+function broadcastScores(code){
 
-function broadcastScores(code) {
+  const room=
+    rooms.get(code);
 
-  const room = rooms.get(code);
-
-  if (!room) return;
+  if(!room)return;
 
   io.to(code).emit(
     'scores:state',
-    room.players.map(player => ({
-      id: player.id,
-      name: player.name,
-      score: player.score
-    }))
+    room.players.map(
+      p=>({
+        id:p.id,
+        name:p.name,
+        score:p.score
+      })
+    )
   );
 
 }
 
+function stopTimer(room){
 
-/* =========================
-   DOODLE
-========================= */
+  if(
+    room?.timer
+  ){
 
-function stopDoodle(room) {
+    clearInterval(
+      room.timer
+    );
 
-  if (room?.doodleTimer) {
-    clearInterval(room.doodleTimer);
-  }
+    room.timer=null;
 
-  if (room) {
-    room.doodleTimer = null;
   }
 
 }
 
 
-function startDoodleRound(code) {
+/* =================================
+   DOODLE
+================================= */
 
-  const room = rooms.get(code);
+function startDoodle(code){
 
-  if (!room || room.game?.name !== 'doodle') {
+  const room=
+    rooms.get(code);
+
+  if(
+    !room||
+    room.game?.name!=='doodle'
+  ){
     return;
   }
 
-  stopDoodle(room);
+  stopTimer(room);
 
-  if (room.players.length < 2) {
-    return;
-  }
+  const d=
+    room.game.doodle;
 
-  const doodle = room.game.doodle;
+  if(
+    d.round>d.total
+  ){
 
-  if (doodle.round > doodle.totalRounds) {
+    room.game=null;
 
     io.to(code).emit(
       'doodle:finished'
     );
 
-    room.game = null;
-
     broadcastRoom(code);
 
     return;
+
   }
 
-
-  /* Rotate drawer every round.
-     With 2 players:
-     Round 1 → Player 1
-     Round 2 → Player 2
-     Round 3 → Player 1
-  */
-
-  doodle.drawerIndex =
-    (doodle.round - 1) %
+  d.drawerIndex=
+    (d.round-1)%
     room.players.length;
 
-  doodle.drawerId =
-    room.players[doodle.drawerIndex].id;
+  d.drawerId=
+    room.players[
+      d.drawerIndex
+    ].id;
 
-  doodle.word =
-    WORDS[
+  d.word=
+    words[
       Math.floor(
-        Math.random() * WORDS.length
+        Math.random()*
+        words.length
       )
     ];
 
-  doodle.timeLeft = 60;
+  d.time=60;
 
 
-  io.to(code).emit('draw:clear');
+  io.to(code).emit(
+    'draw:clear'
+  );
 
 
-  room.players.forEach(player => {
+  room.players.forEach(
+    p=>{
 
-    io.to(player.id).emit(
-      'doodle:state',
-      {
-        round: doodle.round,
-        totalRounds: doodle.totalRounds,
+      io.to(p.id).emit(
+        'doodle:state',
+        {
 
-        drawerId: doodle.drawerId,
+          round:
+            d.round,
 
-        drawerName:
-          room.players[doodle.drawerIndex].name,
+          totalRounds:
+            d.total,
 
-        timeLeft: 60,
+          drawerId:
+            d.drawerId,
 
-        word:
-          player.id === doodle.drawerId
-            ? doodle.word
-            : null
-      }
-    );
+          drawerName:
+            room.players[
+              d.drawerIndex
+            ].name,
 
-  });
+          timeLeft:
+            60,
 
+          word:
+            p.id===d.drawerId
+            ?d.word
+            :null
 
-  room.doodleTimer =
-    setInterval(() => {
-
-      const currentRoom =
-        rooms.get(code);
-
-      if (
-        !currentRoom ||
-        currentRoom.game?.name !== 'doodle'
-      ) {
-
-        if (currentRoom) {
-          stopDoodle(currentRoom);
         }
-
-        return;
-      }
-
-
-      doodle.timeLeft--;
-
-      io.to(code).emit(
-        'doodle:tick',
-        doodle.timeLeft
       );
 
+    }
+  );
 
-      if (doodle.timeLeft <= 0) {
 
-        stopDoodle(currentRoom);
+  room.timer=
+    setInterval(
+      ()=>{
+
+        const r=
+          rooms.get(code);
+
+        if(
+          !r||
+          r.game?.name!=='doodle'
+        ){
+
+          if(r)
+            stopTimer(r);
+
+          return;
+
+        }
+
+        d.time--;
 
         io.to(code).emit(
-          'doodle:message',
-          `⏰ Time's up! The word was ${doodle.word}.`
+          'doodle:tick',
+          d.time
         );
 
-        doodle.round++;
+        if(
+          d.time<=0
+        ){
 
-        setTimeout(() => {
-          startDoodleRound(code);
-        }, 1200);
+          stopTimer(r);
 
-      }
+          io.to(code).emit(
+            'doodle:message',
+            `⏰ Time's up! The word was ${d.word}.`
+          );
 
-    }, 1000);
+          d.round++;
+
+          setTimeout(
+            ()=>startDoodle(code),
+            1000
+          );
+
+        }
+
+      },
+      1000
+    );
 
 }
 
 
-/* =========================
+/* =================================
    TIC TAC TOE
-========================= */
+================================= */
 
-function checkWin(board) {
+function checkWin(board){
 
-  const lines = [
-    [0, 1, 2],
-    [3, 4, 5],
-    [6, 7, 8],
-
-    [0, 3, 6],
-    [1, 4, 7],
-    [2, 5, 8],
-
-    [0, 4, 8],
-    [2, 4, 6]
+  const lines=[
+    [0,1,2],
+    [3,4,5],
+    [6,7,8],
+    [0,3,6],
+    [1,4,7],
+    [2,5,8],
+    [0,4,8],
+    [2,4,6]
   ];
 
+  for(
+    const [a,b,c]
+    of lines
+  ){
 
-  for (const [a, b, c] of lines) {
-
-    if (
-      board[a] &&
-      board[a] === board[b] &&
-      board[b] === board[c]
-    ) {
+    if(
+      board[a]&&
+      board[a]===board[b]&&
+      board[b]===board[c]
+    ){
 
       return board[a];
 
@@ -329,799 +374,715 @@ function checkWin(board) {
 
   }
 
+  return board.every(Boolean)
+    ?'DRAW'
+    :null;
 
-  if (board.every(Boolean)) {
-    return 'DRAW';
+}
+
+function emitTTT(code){
+
+  const t=
+    rooms.get(code)
+      ?.game
+      ?.ttt;
+
+  if(t){
+
+    io.to(code).emit(
+      'ttt:state',
+      t
+    );
+
   }
-
-  return null;
 
 }
 
 
-function emitTTT(code) {
+/* =================================
+   TRUTH
+================================= */
 
-  const room = rooms.get(code);
+function startTruth(code){
 
-  if (!room?.game?.ttt) {
-    return;
-  }
+  const room=
+    rooms.get(code);
 
-  const ttt =
-    room.game.ttt;
+  if(!room)return;
+
+  const t=
+    room.game.truth;
+
+  t.index=
+    t.index%
+    room.players.length;
+
+  const card=
+    truths[
+      Math.floor(
+        Math.random()*
+        truths.length
+      )
+    ];
+
+  t.turnId=
+    room.players[t.index].id;
+
+  t.turnName=
+    room.players[t.index].name;
+
+  t.type=
+    card[0];
+
+  t.prompt=
+    card[1];
 
   io.to(code).emit(
-    'ttt:state',
-    {
-      board: ttt.board,
-      turn: ttt.turn,
-      winner: ttt.winner,
-      players: ttt.players
-    }
+    'truth:state',
+    t
   );
 
 }
 
 
-/* =========================
-   SOCKET CONNECTION
-========================= */
+/* =================================
+   WOULD YOU RATHER
+================================= */
 
-io.on('connection', socket => {
+function startWould(code){
 
+  const room=
+    rooms.get(code);
 
-  /* =======================
-     CREATE ROOM
-  ======================= */
+  if(!room)return;
 
-  socket.on(
-    'room:create',
-    ({ name }) => {
+  const x=
+    wouldCards[
+      Math.floor(
+        Math.random()*
+        wouldCards.length
+      )
+    ];
 
-      if (socket.room) {
-        socket.leave(socket.room);
-      }
+  room.game.would={
 
+    question:
+      'WOULD YOU RATHER?',
 
-      const code =
-        newCode();
+    a:x[0],
 
+    b:x[1],
 
-      const room = {
+    votes:{
+      A:0,
+      B:0
+    },
 
-        host: socket.id,
+    voted:[]
 
-        players: [
-          {
-            id: socket.id,
-            name: cleanName(name),
-            avatar: '😎',
-            score: 0
-          }
-        ],
+  };
 
-        game: null,
-
-        doodleTimer: null
-
-      };
-
-
-      rooms.set(
-        code,
-        room
-      );
-
-
-      socket.room = code;
-
-      socket.join(code);
-
-
-      socket.emit(
-        'room:created',
-        {
-          code
-        }
-      );
-
-
-      broadcastRoom(code);
-
-      broadcastScores(code);
-
-    }
+  io.to(code).emit(
+    'would:state',
+    room.game.would
   );
 
-
-  /* =======================
-     JOIN ROOM
-  ======================= */
-
-  socket.on(
-    'room:join',
-    ({ code, name }) => {
-
-      const cleanCode =
-        String(code || '')
-          .trim()
-          .toUpperCase();
+}
 
 
-      const room =
-        rooms.get(cleanCode);
+/* =================================
+   REACTION
+================================= */
+
+function startReaction(code){
+
+  const room=
+    rooms.get(code);
+
+  if(!room)return;
+
+  const target=
+    reactionThings[
+      Math.floor(
+        Math.random()*
+        reactionThings.length
+      )
+    ];
+
+  const options=[
+    target,
+    ...reactionThings
+      .filter(x=>x!==target)
+      .sort(
+        ()=>Math.random()-.5
+      )
+      .slice(0,3)
+  ].sort(
+    ()=>Math.random()-.5
+  );
+
+  room.game.reaction={
+
+    target,
+
+    options,
+
+    winner:null,
+
+    message:
+      'Pick the named thing as fast as you can!'
+
+  };
+
+  io.to(code).emit(
+    'reaction:state',
+    room.game.reaction
+  );
+
+}
 
 
-      if (!room) {
+/* =================================
+   BIKE RACING
+================================= */
 
-        socket.emit(
-          'room:error',
-          'Room not found. Check the code.'
-        );
+function startBike(code){
 
-        return;
-      }
+  const room=
+    rooms.get(code);
 
+  if(!room)return;
 
-      if (room.players.length >= 7) {
+  room.game.bike={
 
-        socket.emit(
-          'room:error',
-          'Room is full. Maximum 7 players.'
-        );
+    players:
+      room.players.map(
+        p=>({
+          id:p.id,
+          name:p.name,
+          progress:0
+        })
+      ),
 
-        return;
-      }
+    winner:null
 
+  };
 
-      if (room.game) {
+  io.to(code).emit(
+    'bike:state',
+    room.game.bike
+  );
 
-        socket.emit(
-          'room:error',
-          'A game is already running.'
-        );
-
-        return;
-      }
-
-
-      const avatars = [
-        '🦊',
-        '🐼',
-        '🐸',
-        '🐯',
-        '🐨',
-        '🐰',
-        '🐙'
-      ];
+}
 
 
-      room.players.push({
+/* =================================
+   NEON FIGHT
+================================= */
 
-        id: socket.id,
+function startFight(code){
 
-        name: cleanName(name),
+  const room=
+    rooms.get(code);
 
-        avatar:
-          avatars[
-            (room.players.length - 1) %
-            avatars.length
+  if(!room)return;
+
+  room.game.fight={
+
+    players:
+      room.players
+        .slice(0,2)
+        .map(
+          p=>({
+            id:p.id,
+            name:p.name,
+            hp:100
+          })
+        ),
+
+    winner:null,
+
+    message:
+      '⚡ FIGHT! ⚡'
+
+  };
+
+  io.to(code).emit(
+    'fight:state',
+    room.game.fight
+  );
+
+}
+
+
+/* =================================
+   SOCKET
+================================= */
+
+io.on(
+  'connection',
+  socket=>{
+
+
+    /* CREATE ROOM */
+
+    socket.on(
+      'room:create',
+      ({name})=>{
+
+        const code=
+          newCode();
+
+        const room={
+
+          host:
+            socket.id,
+
+          players:[
+            {
+              id:
+                socket.id,
+
+              name:
+                cleanName(name),
+
+              avatar:
+                '😎',
+
+              score:
+                0
+            }
           ],
 
-        score: 0
+          game:null,
 
-      });
+          timer:null
 
+        };
 
-      socket.room =
-        cleanCode;
-
-      socket.join(cleanCode);
-
-
-      broadcastRoom(cleanCode);
-
-      broadcastScores(cleanCode);
-
-    }
-  );
-
-
-  /* =======================
-     LEAVE ROOM
-  ======================= */
-
-  socket.on(
-    'room:leave',
-    () => {
-      leaveRoom(socket);
-    }
-  );
-
-
-  /* =======================
-     START GAME
-  ======================= */
-
-  socket.on(
-    'game:start',
-    ({ game }, ack) => {
-
-      const room =
-        getRoom(socket);
-
-
-      function fail(message) {
-
-        socket.emit(
-          'game:error',
-          message
+        rooms.set(
+          code,
+          room
         );
 
-        if (typeof ack === 'function') {
+        socket.room=
+          code;
+
+        socket.join(code);
+
+        socket.emit(
+          'room:created',
+          {code}
+        );
+
+        broadcastRoom(code);
+
+        broadcastScores(code);
+
+      }
+    );
+
+
+    /* JOIN ROOM */
+
+    socket.on(
+      'room:join',
+      ({code,name})=>{
+
+        code=
+          String(code||'')
+            .trim()
+            .toUpperCase();
+
+        const room=
+          rooms.get(code);
+
+        if(!room){
+
+          return socket.emit(
+            'room:error',
+            'Room not found. Check the code.'
+          );
+
+        }
+
+        if(
+          room.players.length>=7
+        ){
+
+          return socket.emit(
+            'room:error',
+            'Room is full. Maximum 7 players.'
+          );
+
+        }
+
+        if(room.game){
+
+          return socket.emit(
+            'room:error',
+            'A game is already running.'
+          );
+
+        }
+
+        const avatars=[
+          '🦊',
+          '🐼',
+          '🐸',
+          '🐯',
+          '🐨',
+          '🐰',
+          '🐙'
+        ];
+
+        room.players.push({
+
+          id:
+            socket.id,
+
+          name:
+            cleanName(name),
+
+          avatar:
+            avatars[
+              room.players.length-1
+            ]||'🙂',
+
+          score:
+            0
+
+        });
+
+        socket.room=
+          code;
+
+        socket.join(code);
+
+        broadcastRoom(code);
+
+        broadcastScores(code);
+
+      }
+    );
+
+
+    /* PARTY CHAT */
+
+    socket.on(
+      'party:chat',
+      message=>{
+
+        const room=
+          roomOf(socket);
+
+        if(!room)return;
+
+        const player=
+          room.players.find(
+            p=>p.id===socket.id
+          );
+
+        io.to(socket.room).emit(
+          'party:chat',
+          {
+
+            name:
+              player?.name||
+              'Player',
+
+            msg:
+              String(message||'')
+                .slice(0,160)
+
+          }
+        );
+
+      }
+    );
+
+
+    /* START GAME */
+
+    socket.on(
+      'game:start',
+      ({game},ack)=>{
+
+        const room=
+          roomOf(socket);
+
+        const fail=
+          message=>{
+
+            socket.emit(
+              'game:error',
+              message
+            );
+
+            if(ack){
+
+              ack({
+                ok:false,
+                message
+              });
+
+            }
+
+          };
+
+
+        if(!room)
+          return fail(
+            'Create or join a room first.'
+          );
+
+
+        if(
+          room.host!==socket.id
+        )
+          return fail(
+            'Only the HOST can start a game.'
+          );
+
+
+        if(room.game)
+          return fail(
+            'A game is already running.'
+          );
+
+
+        const available=[
+          'doodle',
+          'ultimate',
+          'truth',
+          'would',
+          'emoji',
+          'quiz',
+          'reaction',
+          'word',
+          'bike',
+          'fight'
+        ];
+
+
+        if(
+          !available.includes(game)
+        )
+          return fail(
+            'Game not available.'
+          );
+
+
+        if(
+          game==='ultimate'&&
+          room.players.length!==2
+        )
+          return fail(
+            'Ultimate Tic-Tac-Toe needs exactly 2 players.'
+          );
+
+
+        if(
+          game==='fight'&&
+          room.players.length!==2
+        )
+          return fail(
+            'Neon Fight needs exactly 2 players.'
+          );
+
+
+        if(
+          game==='doodle'&&
+          room.players.length<2
+        )
+          return fail(
+            'Doodle Guess needs at least 2 players.'
+          );
+
+
+        room.game={
+          name:game
+        };
+
+
+        if(game==='doodle'){
+
+          room.game.doodle={
+            round:1,
+            total:5
+          };
+
+          io.to(socket.room).emit(
+            'game:started',
+            'doodle'
+          );
+
+          startDoodle(
+            socket.room
+          );
+
+        }
+
+        else if(
+          game==='ultimate'
+        ){
+
+          room.game.ttt={
+
+            board:
+              Array(9).fill(''),
+
+            turn:'X',
+
+            players:[
+              room.players[0].id,
+              room.players[1].id
+            ],
+
+            winner:null
+
+          };
+
+          io.to(socket.room).emit(
+            'game:started',
+            'ultimate'
+          );
+
+          emitTTT(
+            socket.room
+          );
+
+        }
+
+        else if(
+          game==='truth'
+        ){
+
+          room.game.truth={
+            index:0
+          };
+
+          io.to(socket.room).emit(
+            'game:started',
+            'truth'
+          );
+
+          startTruth(
+            socket.room
+          );
+
+        }
+
+        else if(
+          game==='would'
+        ){
+
+          io.to(socket.room).emit(
+            'game:started',
+            'would'
+          );
+
+          startWould(
+            socket.room
+          );
+
+        }
+
+        else if(
+          game==='reaction'
+        ){
+
+          io.to(socket.room).emit(
+            'game:started',
+            'reaction'
+          );
+
+          startReaction(
+            socket.room
+          );
+
+        }
+
+        else if(
+          game==='bike'
+        ){
+
+          io.to(socket.room).emit(
+            'game:started',
+            'bike'
+          );
+
+          startBike(
+            socket.room
+          );
+
+        }
+
+        else if(
+          game==='fight'
+        ){
+
+          io.to(socket.room).emit(
+            'game:started',
+            'fight'
+          );
+
+          startFight(
+            socket.room
+          );
+
+        }
+
+        else{
+
+          io.to(socket.room).emit(
+            'game:started',
+            game
+          );
+
+        }
+
+
+        broadcastRoom(
+          socket.room
+        );
+
+
+        if(ack){
 
           ack({
-            ok: false,
-            message
+            ok:true
           });
 
         }
 
       }
+    );
 
 
-      if (!room) {
+    /* END GAME */
 
-        fail(
-          'Create or join a room first.'
-        );
+    socket.on(
+      'game:end',
+      ()=>{
 
-        return;
-      }
+        const room=
+          roomOf(socket);
 
-
-      if (socket.id !== room.host) {
-
-        fail(
-          'Only the HOST can start a game.'
-        );
-
-        return;
-      }
-
-
-      const availableGames = [
-        'doodle',
-        'ultimate',
-        'truth',
-        'would',
-        'emoji',
-        'quiz',
-        'reaction',
-        'word'
-      ];
-
-
-      if (!availableGames.includes(game)) {
-
-        fail(
-          'That game is not available.'
-        );
-
-        return;
-      }
-
-
-      if (
-        game === 'ultimate' &&
-        room.players.length !== 2
-      ) {
-
-        fail(
-          'Ultimate Tic-Tac-Toe needs exactly 2 players.'
-        );
-
-        return;
-      }
-
-
-      if (
-        game === 'doodle' &&
-        room.players.length < 2
-      ) {
-
-        fail(
-          'Doodle Guess needs at least 2 players.'
-        );
-
-        return;
-      }
-
-
-      stopDoodle(room);
-
-
-      room.game = {
-        name: game
-      };
-
-
-      /* DOODLE */
-
-      if (game === 'doodle') {
-
-        room.game.doodle = {
-
-          round: 1,
-
-          totalRounds: 5,
-
-          drawerIndex: 0,
-
-          drawerId: null,
-
-          word: null,
-
-          timeLeft: 60
-
-        };
-
-
-        io.to(roomCode(socket)).emit(
-          'game:started',
-          'doodle'
-        );
-
-
-        startDoodleRound(
-          roomCode(socket)
-        );
-
-      }
-
-
-      /* TIC TAC TOE */
-
-      else if (game === 'ultimate') {
-
-        room.game.ttt = {
-
-          board:
-            Array(9).fill(''),
-
-          turn: 'X',
-
-          players: [
-            room.players[0].id,
-            room.players[1].id
-          ],
-
-          winner: null
-
-        };
-
-
-        io.to(roomCode(socket)).emit(
-          'game:started',
-          'ultimate'
-        );
-
-
-        emitTTT(
-          roomCode(socket)
-        );
-
-      }
-
-
-      /* OTHER GAMES */
-
-      else {
-
-        io.to(roomCode(socket)).emit(
-          'game:started',
-          game
-        );
-
-      }
-
-
-      broadcastRoom(
-        roomCode(socket)
-      );
-
-
-      if (typeof ack === 'function') {
-
-        ack({
-          ok: true,
-          game
-        });
-
-      }
-
-    }
-  );
-
-
-  /* =======================
-     DRAWING
-  ======================= */
-
-  socket.on(
-    'draw:stroke',
-    data => {
-
-      const room =
-        getRoom(socket);
-
-
-      if (
-        !room?.game?.doodle
-      ) {
-        return;
-      }
-
-
-      if (
-        room.game.doodle.drawerId !==
-        socket.id
-      ) {
-        return;
-      }
-
-
-      socket
-        .to(socket.room)
-        .emit(
-          'draw:stroke',
-          data
-        );
-
-    }
-  );
-
-
-  socket.on(
-    'draw:clear',
-    () => {
-
-      const room =
-        getRoom(socket);
-
-
-      if (
-        !room?.game?.doodle
-      ) {
-        return;
-      }
-
-
-      if (
-        room.game.doodle.drawerId !==
-        socket.id
-      ) {
-        return;
-      }
-
-
-      io.to(socket.room).emit(
-        'draw:clear'
-      );
-
-    }
-  );
-
-
-  /* =======================
-     DOODLE GUESS
-  ======================= */
-
-  socket.on(
-    'doodle:guess',
-    ({ guess }) => {
-
-      const code =
-        socket.room;
-
-      const room =
-        getRoom(socket);
-
-
-      if (
-        !room?.game?.doodle
-      ) {
-        return;
-      }
-
-
-      const doodle =
-        room.game.doodle;
-
-
-      if (
-        socket.id === doodle.drawerId
-      ) {
-        return;
-      }
-
-
-      const text =
-        String(guess || '')
-          .trim();
-
-
-      if (!text) {
-        return;
-      }
-
-
-      const player =
-        room.players.find(
-          p => p.id === socket.id
-        );
-
-
-      if (!player) {
-        return;
-      }
-
-
-      /* CORRECT ANSWER */
-
-      if (
-        text.toUpperCase() ===
-        doodle.word.toUpperCase()
-      ) {
-
-        player.score += 100;
-
-
-        const drawer =
-          room.players.find(
-            p => p.id === doodle.drawerId
-          );
-
-
-        if (drawer) {
-          drawer.score += 50;
+        if(
+          !room||
+          room.host!==socket.id
+        ){
+          return;
         }
 
+        stopTimer(room);
 
-        io.to(code).emit(
-          'doodle:correct',
-          {
-            name: player.name,
-            word: doodle.word
-          }
-        );
+        room.game=null;
 
-
-        broadcastScores(code);
-
-
-        stopDoodle(room);
-
-
-        doodle.round++;
-
-
-        setTimeout(() => {
-
-          startDoodleRound(code);
-
-        }, 1200);
-
-
-      }
-
-
-      /* WRONG GUESS */
-
-      else {
-
-        io.to(code).emit(
-          'doodle:guess',
-          {
-            name: player.name,
-            guess: text.slice(0, 40)
-          }
-        );
-
-      }
-
-    }
-  );
-
-
-  /* =======================
-     TIC TAC TOE MOVE
-  ======================= */
-
-  socket.on(
-    'ttt:move',
-    ({ index }) => {
-
-      const code =
-        socket.room;
-
-      const room =
-        getRoom(socket);
-
-      const ttt =
-        room?.game?.ttt;
-
-
-      if (!ttt) {
-        return;
-      }
-
-
-      if (ttt.winner) {
-        return;
-      }
-
-
-      const symbol =
-        ttt.players[0] === socket.id
-          ? 'X'
-          : ttt.players[1] === socket.id
-            ? 'O'
-            : null;
-
-
-      if (!symbol) {
-        return;
-      }
-
-
-      if (symbol !== ttt.turn) {
-        return;
-      }
-
-
-      if (
-        !Number.isInteger(index) ||
-        index < 0 ||
-        index > 8
-      ) {
-        return;
-      }
-
-
-      if (ttt.board[index]) {
-        return;
-      }
-
-
-      ttt.board[index] =
-        symbol;
-
-
-      ttt.winner =
-        checkWin(ttt.board);
-
-
-      if (!ttt.winner) {
-
-        ttt.turn =
-          symbol === 'X'
-            ? 'O'
-            : 'X';
-
-      }
-
-
-      if (
-        ttt.winner &&
-        ttt.winner !== 'DRAW'
-      ) {
-
-        const player =
-          room.players.find(
-            p => p.id === socket.id
-          );
-
-
-        if (player) {
-          player.score += 250;
-        }
-
-
-        broadcastScores(code);
-
-      }
-
-
-      emitTTT(code);
-
-    }
-  );
-
-
-  /* =======================
-     RESET TTT
-  ======================= */
-
-  socket.on(
-    'ttt:reset',
-    () => {
-
-      const room =
-        getRoom(socket);
-
-
-      if (
-        !room?.game?.ttt
-      ) {
-        return;
-      }
-
-
-      if (
-        socket.id !== room.host
-      ) {
-        return;
-      }
-
-
-      room.game.ttt.board =
-        Array(9).fill('');
-
-
-      room.game.ttt.turn =
-        'X';
-
-
-      room.game.ttt.winner =
-        null;
-
-
-      emitTTT(
-        socket.room
-      );
-
-    }
-  );
-
-
-  /* =======================
-     SCORE
-  ======================= */
-
-  socket.on(
-    'score:add',
-    points => {
-
-      const room =
-        getRoom(socket);
-
-
-      const player =
-        room?.players.find(
-          p => p.id === socket.id
-        );
-
-
-      const value =
-        Math.max(
-          0,
-          Math.min(
-            500,
-            Number(points) || 0
-          )
-        );
-
-
-      if (
-        player &&
-        value
-      ) {
-
-        player.score += value;
-
-        broadcastScores(
-          socket.room
+        io.to(socket.room).emit(
+          'game:ended',
+          'Game ended. Back to lobby.'
         );
 
         broadcastRoom(
@@ -1129,67 +1090,694 @@ io.on('connection', socket => {
         );
 
       }
-
-    }
-  );
-
-
-  /* =======================
-     DISCONNECT
-  ======================= */
-
-  socket.on(
-    'disconnect',
-    () => {
-
-      leaveRoom(socket);
-
-    }
-  );
-
-});
-
-
-/* =========================
-   HELPER
-========================= */
-
-function roomCode(socket) {
-
-  return socket.room;
-
-}
-
-
-/* =========================
-   LEAVE ROOM
-========================= */
-
-function leaveRoom(socket) {
-
-  const code =
-    socket.room;
-
-  const room =
-    rooms.get(code);
-
-
-  if (!room) {
-    return;
-  }
-
-
-  stopDoodle(room);
-
-
-  room.players =
-    room.players.filter(
-      player =>
-        player.id !== socket.id
     );
 
 
-  if (!room.players.length) {
+    /* DRAWING */
+
+    socket.on(
+      'draw:stroke',
+      data=>{
+
+        const room=
+          roomOf(socket);
+
+        if(
+          room?.game?.doodle
+            ?.drawerId===socket.id
+        ){
+
+          socket
+            .to(socket.room)
+            .emit(
+              'draw:stroke',
+              data
+            );
+
+        }
+
+      }
+    );
+
+
+    socket.on(
+      'draw:clear',
+      ()=>{
+
+        const room=
+          roomOf(socket);
+
+        if(
+          room?.game?.doodle
+            ?.drawerId===socket.id
+        ){
+
+          io.to(socket.room).emit(
+            'draw:clear'
+          );
+
+        }
+
+      }
+    );
+
+
+    /* DOODLE GUESS */
+
+    socket.on(
+      'doodle:guess',
+      ({guess})=>{
+
+        const room=
+          roomOf(socket);
+
+        const d=
+          room?.game?.doodle;
+
+        if(!d)return;
+
+        if(
+          d.drawerId===socket.id
+        )return;
+
+        const player=
+          room.players.find(
+            p=>p.id===socket.id
+          );
+
+        const text=
+          String(guess||'')
+            .trim();
+
+        if(
+          !player||
+          !text
+        )return;
+
+
+        if(
+          text.toUpperCase()===
+          d.word.toUpperCase()
+        ){
+
+          player.score+=100;
+
+          const drawer=
+            room.players.find(
+              p=>p.id===d.drawerId
+            );
+
+          if(drawer)
+            drawer.score+=50;
+
+          io.to(socket.room).emit(
+            'doodle:correct',
+            {
+              name:player.name,
+              word:d.word
+            }
+          );
+
+          broadcastScores(
+            socket.room
+          );
+
+          stopTimer(room);
+
+          d.round++;
+
+          setTimeout(
+            ()=>startDoodle(socket.room),
+            1000
+          );
+
+        }
+
+        else{
+
+          io.to(socket.room).emit(
+            'doodle:guess',
+            {
+              name:player.name,
+              guess:text.slice(0,40)
+            }
+          );
+
+        }
+
+      }
+    );
+
+
+    /* TTT */
+
+    socket.on(
+      'ttt:move',
+      ({index})=>{
+
+        const room=
+          roomOf(socket);
+
+        const t=
+          room?.game?.ttt;
+
+        if(
+          !t||
+          t.winner
+        )return;
+
+        const n=
+          t.players.indexOf(
+            socket.id
+          );
+
+        const symbol=
+          n===0
+          ?'X'
+          :n===1
+            ?'O'
+            :null;
+
+        if(!symbol)return;
+
+        if(
+          symbol!==t.turn
+        )return;
+
+        if(
+          !Number.isInteger(index)||
+          index<0||
+          index>8||
+          t.board[index]
+        )return;
+
+        t.board[index]=
+          symbol;
+
+        t.winner=
+          checkWin(t.board);
+
+        if(!t.winner){
+
+          t.turn=
+            symbol==='X'
+            ?'O'
+            :'X';
+
+        }
+
+        if(
+          t.winner&&
+          t.winner!=='DRAW'
+        ){
+
+          const p=
+            room.players.find(
+              x=>x.id===socket.id
+            );
+
+          if(p)
+            p.score+=250;
+
+          broadcastScores(
+            socket.room
+          );
+
+        }
+
+        emitTTT(
+          socket.room
+        );
+
+      }
+    );
+
+
+    socket.on(
+      'ttt:reset',
+      ()=>{
+
+        const room=
+          roomOf(socket);
+
+        const t=
+          room?.game?.ttt;
+
+        if(
+          room&&
+          t&&
+          room.host===socket.id
+        ){
+
+          t.board=
+            Array(9).fill('');
+
+          t.turn='X';
+
+          t.winner=null;
+
+          emitTTT(
+            socket.room
+          );
+
+        }
+
+      }
+    );
+
+
+    /* TRUTH */
+
+    socket.on(
+      'truth:done',
+      ()=>{
+
+        const room=
+          roomOf(socket);
+
+        const t=
+          room?.game?.truth;
+
+        if(!t)return;
+
+        if(
+          room.players[
+            t.index
+          ]?.id!==socket.id
+        ){
+          return;
+        }
+
+        t.index=
+          (t.index+1)%
+          room.players.length;
+
+        startTruth(
+          socket.room
+        );
+
+      }
+    );
+
+
+    /* WOULD YOU RATHER */
+
+    socket.on(
+      'would:vote',
+      choice=>{
+
+        const room=
+          roomOf(socket);
+
+        const w=
+          room?.game?.would;
+
+        if(
+          !w||
+          !['A','B'].includes(choice)||
+          w.voted.includes(socket.id)
+        ){
+          return;
+        }
+
+        w.voted.push(
+          socket.id
+        );
+
+        w.votes[choice]++;
+
+        io.to(socket.room).emit(
+          'would:state',
+          w
+        );
+
+      }
+    );
+
+
+    socket.on(
+      'would:next',
+      ()=>{
+
+        const room=
+          roomOf(socket);
+
+        if(
+          room?.host===socket.id
+        ){
+
+          startWould(
+            socket.room
+          );
+
+        }
+
+      }
+    );
+
+
+    /* REACTION */
+
+    socket.on(
+      'reaction:pick',
+      choice=>{
+
+        const room=
+          roomOf(socket);
+
+        const g=
+          room?.game?.reaction;
+
+        if(
+          !g||
+          g.winner
+        )return;
+
+        if(
+          choice!==g.target
+        ){
+          return;
+        }
+
+        g.winner=
+          socket.id;
+
+        const p=
+          room.players.find(
+            x=>x.id===socket.id
+          );
+
+        if(p)
+          p.score+=150;
+
+        g.message=
+          `🏆 ${p?.name||'Player'} was fastest!`;
+
+        broadcastScores(
+          socket.room
+        );
+
+        io.to(socket.room).emit(
+          'reaction:state',
+          g
+        );
+
+        setTimeout(
+          ()=>{
+            if(
+              rooms.get(socket.room)
+                ?.game
+                ?.name==='reaction'
+            ){
+              startReaction(
+                socket.room
+              );
+            }
+          },
+          1200
+        );
+
+      }
+    );
+
+
+    /* BIKE BOOST */
+
+    socket.on(
+      'bike:boost',
+      ()=>{
+
+        const room=
+          roomOf(socket);
+
+        const g=
+          room?.game?.bike;
+
+        if(
+          !g||
+          g.winner
+        )return;
+
+        const p=
+          g.players.find(
+            x=>x.id===socket.id
+          );
+
+        if(!p)return;
+
+        p.progress=
+          Math.min(
+            100,
+            p.progress+
+            8+
+            Math.floor(
+              Math.random()*8
+            )
+          );
+
+
+        if(
+          p.progress>=100
+        ){
+
+          g.winner=
+            socket.id;
+
+          const real=
+            room.players.find(
+              x=>x.id===socket.id
+            );
+
+          if(real)
+            real.score+=300;
+
+          broadcastScores(
+            socket.room
+          );
+
+          io.to(socket.room).emit(
+            'bike:state',
+            g
+          );
+
+          setTimeout(
+            ()=>{
+              const r=
+                rooms.get(socket.room);
+
+              if(
+                r?.game?.name==='bike'
+              ){
+
+                r.game=null;
+
+                io.to(socket.room).emit(
+                  'game:ended',
+                  `${real?.name||'Player'} won the race! 🏁`
+                );
+
+                broadcastRoom(
+                  socket.room
+                );
+
+              }
+
+            },
+            1200
+          );
+
+        }
+
+        else{
+
+          io.to(socket.room).emit(
+            'bike:state',
+            g
+          );
+
+        }
+
+      }
+    );
+
+
+    /* FIGHT */
+
+    socket.on(
+      'fight:move',
+      move=>{
+
+        const room=
+          roomOf(socket);
+
+        const g=
+          room?.game?.fight;
+
+        if(
+          !g||
+          g.winner
+        )return;
+
+        const me=
+          g.players.find(
+            p=>p.id===socket.id
+          );
+
+        const enemy=
+          g.players.find(
+            p=>p.id!==socket.id
+          );
+
+        if(
+          !me||
+          !enemy
+        )return;
+
+
+        let damage=10;
+
+        if(move==='kick')
+          damage=15;
+
+        if(move==='special')
+          damage=25;
+
+
+        enemy.hp=
+          Math.max(
+            0,
+            enemy.hp-damage
+          );
+
+
+        g.message=
+          `💥 ${me.name} used ${String(move).toUpperCase()}!`;
+
+
+        if(
+          enemy.hp<=0
+        ){
+
+          g.winner=
+            me.id;
+
+          const real=
+            room.players.find(
+              p=>p.id===me.id
+            );
+
+          if(real)
+            real.score+=300;
+
+          g.message=
+            `🏆 ${me.name} WINS THE FIGHT! ⚡`;
+
+          broadcastScores(
+            socket.room
+          );
+
+        }
+
+
+        io.to(socket.room).emit(
+          'fight:state',
+          g
+        );
+
+      }
+    );
+
+
+    /* SCORE */
+
+    socket.on(
+      'score:add',
+      points=>{
+
+        const room=
+          roomOf(socket);
+
+        const player=
+          room?.players.find(
+            p=>p.id===socket.id
+          );
+
+        const value=
+          Math.max(
+            0,
+            Math.min(
+              500,
+              Number(points)||0
+            )
+          );
+
+        if(
+          player&&
+          value
+        ){
+
+          player.score+=value;
+
+          broadcastScores(
+            socket.room
+          );
+
+          broadcastRoom(
+            socket.room
+          );
+
+        }
+
+      }
+    );
+
+
+    /* LEAVE */
+
+    socket.on(
+      'room:leave',
+      ()=>{
+        leaveRoom(socket);
+      }
+    );
+
+
+    socket.on(
+      'disconnect',
+      ()=>{
+        leaveRoom(socket);
+      }
+    );
+
+  }
+);
+
+
+/* =================================
+   LEAVE ROOM
+================================= */
+
+function leaveRoom(socket){
+
+  const code=
+    socket.room;
+
+  const room=
+    rooms.get(code);
+
+  if(!room)return;
+
+  stopTimer(room);
+
+  room.players=
+    room.players.filter(
+      p=>p.id!==socket.id
+    );
+
+
+  if(
+    !room.players.length
+  ){
 
     rooms.delete(code);
 
@@ -1198,28 +1786,19 @@ function leaveRoom(socket) {
   }
 
 
-  /* If host leaves,
-     next player becomes host */
+  if(
+    room.host===socket.id
+  ){
 
-  if (
-    room.host === socket.id
-  ) {
-
-    room.host =
+    room.host=
       room.players[0].id;
 
   }
 
 
-  socket.leave(code);
+  if(room.game){
 
-  socket.room = null;
-
-
-  if (room.game) {
-
-    room.game = null;
-
+    room.game=null;
 
     io.to(code).emit(
       'game:ended',
@@ -1229,6 +1808,10 @@ function leaveRoom(socket) {
   }
 
 
+  socket.leave(code);
+
+  socket.room=null;
+
   broadcastRoom(code);
 
   broadcastScores(code);
@@ -1236,22 +1819,19 @@ function leaveRoom(socket) {
 }
 
 
-/* =========================
+/* =================================
    SERVER
-========================= */
+================================= */
 
-const PORT =
-  process.env.PORT || 3000;
-
+const PORT=
+  process.env.PORT||3000;
 
 server.listen(
   PORT,
   '0.0.0.0',
-  () => {
-
+  ()=>{
     console.log(
       `PlayRoom running on port ${PORT}`
     );
-
   }
 );
