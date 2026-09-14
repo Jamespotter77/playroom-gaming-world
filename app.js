@@ -8,7 +8,13 @@ function toggleJoin(){$('#join').classList.toggle('hidden');$('#playerName')?.fo
 function createRoom(){const n=$('#playerName').value.trim()||'Player';socket.emit('room:create',{name:n})}
 function joinRoom(){const n=$('#playerName').value.trim()||'Player',c=$('#roomInput').value.trim();if(!c)return toast('Enter the room code first.');socket.emit('room:join',{code:c,name:n})}
 function hideAll(){$('#room').classList.add('hidden');$('#play').classList.add('hidden')}
-function showRoom(){hideAll();$('#room').classList.remove('hidden');window.scrollTo({top:0,behavior:'smooth'})}
+function showRoom(){
+  hideAll();
+  $('#room').classList.remove('hidden');
+  setTimeout(() => {
+    $('#room').scrollIntoView({behavior:'smooth', block:'start'});
+  }, 100);
+}
 function goHome(){socket.emit('room:leave');room=null;hideAll();window.scrollTo({top:0,behavior:'smooth'})}
 function renderPlayers(){if(!room)return;$('#players').innerHTML=room.players.map(p=>`<div class="player"><span class="av">${p.avatar}</span><b>${escapeHtml(p.name)}</b>${p.id===room.host?' <small>HOST</small>':''}<span style="margin-left:auto">🏆 ${p.score||0}</span></div>`).join('')}
 function escapeHtml(v){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
